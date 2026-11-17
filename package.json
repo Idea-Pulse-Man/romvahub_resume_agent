@@ -1,0 +1,19 @@
+{
+  "name": "romva-resume-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Makes Resumes and cover letters for romva.space with your own signed-in ChatGPT, in the background on this computer.",
+  "type": "module",
+  "main": "src/agent.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup": "node src/setup.js",
+    "start": "node src/agent.js",
+    "once": "node src/agent.js --once"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.9.0"
+  }
+}
