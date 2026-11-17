@@ -83,7 +83,8 @@ PDFs attached.
     page; **150000** when none is given.
   - **How did you hear about us:** **Jobright AI** if offered, else a job
     board option ("Jobright AI" typed into a text box).
-  - **Referrer's name / email:** never written.
+  - **Referrer's name / email:** never written; a required referrer name box,
+    or one that says "If No, type N/A", gets **N/A**.
 
   A question ChatGPT cannot answer from the Resume is left empty for you, and
   a field you have already filled is never changed.

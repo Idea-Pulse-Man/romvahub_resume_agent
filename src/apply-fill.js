@@ -171,6 +171,17 @@
     );
   }
 
+  /**
+   * A referrer's name or email box: no one referred the applicant, so a name is
+   * never written. "N/A" when the box must be filled ("If No, type N/A", or
+   * required); otherwise it is left empty.
+   */
+  function referrerText(el, label) {
+    if (el.type === 'email') return undefined; // "N/A" is not an email address: left for the person
+    const text = norm(label);
+    return /\bn\/?a\b|not applicable/.test(text) || isRequired(el, label) ? 'N/A' : undefined;
+  }
+
   /** Sets a value the way typing would, so React/Vue forms notice it. */
   function setValue(el, value) {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -208,7 +219,7 @@
     if (isTextarea && /cover[\s_-]*letter/.test(d)) return data.coverLetterText || undefined;
     if (isTextarea) return undefined; // free-text questions: ChatGPT answers them (questions())
     const own = norm(`${labelOf(el)} ${el.name || ''}`);
-    if (REFERRER.test(own)) return undefined; // a referrer's name is never written
+    if (REFERRER.test(own)) return referrerText(el, labelOf(el)); // a referrer's name is never written
     if (SOURCE.test(own)) return 'Jobright AI';
     const fixed = fixedAnswer(own);
     if (fixed) return fixed[0];
@@ -631,7 +642,15 @@
       const required = isRequired(el, label);
       const asked = norm(question);
       if (el.tagName !== 'TEXTAREA' && !required && !SALARY.test(asked)) continue;
-      if (/cover[\s_-]*letter/.test(asked) || REFERRER.test(asked)) continue;
+      if (/cover[\s_-]*letter/.test(asked)) continue;
+      if (REFERRER.test(asked)) {
+        const text = referrerText(el, label);
+        if (text) {
+          setValue(el, text);
+          settled += 1;
+        }
+        continue;
+      }
       if (SOURCE.test(asked) && el.tagName !== 'TEXTAREA') {
         setValue(el, 'Jobright AI');
         settled += 1;

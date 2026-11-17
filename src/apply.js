@@ -131,7 +131,7 @@ function questionsPrompt(job, questions, pageText) {
     '',
     'Salary / compensation expectations: if the job post or the application page gives a pay range for this role, answer the middle of it (for $120,000 to $180,000, answer 150000); if it gives none, answer 150000. Write a plain number with no "$" or commas, unless the field asks for a range or text; for a choice, pick the option that contains that number.',
     '',
-    "Never write a referrer's name or email: answer those with an empty string. If any other question needs a fact that is not in the Resume or the details below (a reference, an ID number, a date), or you are not sure, answer with an empty string too: the applicant fills it in.",
+    "Nobody referred the applicant. Never write a referrer's name or email: answer those with an empty string, or \"N/A\" when the question says to type N/A if not referred. If any other question needs a fact that is not in the Resume or the details below (a reference, an ID number, a date), or you are not sure, answer with an empty string too: the applicant fills it in.",
     '',
     'Reply with only this JSON, in one code block, with an answer for every id:',
     '{"answers":[{"id":"<id>","answer":"<text, or a list of option texts>"}]}',
