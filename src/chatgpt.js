@@ -245,12 +245,20 @@ export function createChatGpt(settings) {
 
     const deadline = Date.now() + settings.answerTimeoutMinutes * 60_000;
     let started = false;
+    let sawStreaming = false;
     let last = '';
     let stableSince = 0;
     while (Date.now() < deadline) {
       await sleep(1000);
       const answer = await page.evaluate(IN_PAGE.answer(marker));
-      started ||= answer.streaming || answer.pres.length > 0;
+      sawStreaming ||= answer.streaming;
+      // Every question asks for JSON, so braces after the request marker mean
+      // the answer has begun — even one in plain text (no code block) while
+      // chatgpt.com's Stop button is not recognised.
+      started ||= answer.streaming || answer.pres.length > 0 || /\{[\s\S]*\}/.test(answer.tail);
+      // Without the Stop button to say it is still writing, a pause in the
+      // writing must last longer before the answer is taken as finished.
+      const settleMs = sawStreaming ? 3000 : 10_000;
       const key = JSON.stringify([answer.pres, answer.tail]);
       if (!started || answer.streaming) {
         stableSince = 0;
@@ -262,7 +270,7 @@ export function createChatGpt(settings) {
         stableSince = Date.now();
         continue;
       }
-      if (Date.now() - stableSince >= 3000) {
+      if (Date.now() - stableSince >= settleMs) {
         const text = answerText(answer);
         if (text) return text;
       }

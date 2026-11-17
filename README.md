@@ -17,6 +17,11 @@ For each application it:
 
 Each chat is a temporary chat in its own tab, closed when it is done.
 
+If the cover letter fails after the Resume is made, the application comes back
+later for its cover letter alone. If the files cannot be written to the save
+folder (a path too long, a full disk), they are still on romva.space and the
+work carries on.
+
 ## Needs
 
 - Windows 10/11, **Node.js 20+** (https://nodejs.org), **Google Chrome** (or Edge)
