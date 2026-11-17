@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi } from './api.js';
+import { createApplier } from './apply.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
 import { DATA_DIR, loadConfig, loadSession } from './config.js';
 import { log } from './log.js';
@@ -119,6 +120,11 @@ async function main() {
     saveDir: config.saveDir,
     api: config.apiUrl,
   });
+
+  // Apply runs alongside, in windows of its own (apply.js); it never submits.
+  if (config.apply.enabled && !once) {
+    void createApplier(api, chatgpt, config.apply).run();
+  }
 
   let waitingForChatGpt = false;
   let stoppedLogged = false;

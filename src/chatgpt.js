@@ -215,7 +215,9 @@ export function createChatGpt(settings) {
   }
 
   async function askIn(page, message) {
-    await page.bringToFront();
+    // Not brought to the front: a new tab is already the active one in its
+    // window, and focusing the window would pull the person away from an
+    // application form they are filling in.
     const url = new URL(settings.url);
     if (settings.temporaryChat) url.searchParams.set('temporary-chat', 'true');
     try {
@@ -317,6 +319,26 @@ export function createChatGpt(settings) {
       const page = pages.find((p) => /chatgpt\.com/.test(p.url())) ?? pages[0] ?? (await (await browser()).newPage());
       await page.bringToFront();
       if (!/chatgpt\.com/.test(page.url())) await page.goto(settings.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    },
+
+    /**
+     * A job's application page in a window of its own (for Apply), so the
+     * person can check them one by one apart from the ChatGPT tabs.
+     */
+    async openWindow(url) {
+      const b = await browser();
+      const session = await b.target().createCDPSession();
+      try {
+        const { targetId } = await session.send('Target.createTarget', { url, newWindow: true, background: true });
+        const target = await b.waitForTarget((t) => t._targetId === targetId, { timeout: 30_000 });
+        return await target.page();
+      } catch {
+        const page = await b.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
+        return page;
+      } finally {
+        await session.detach().catch(() => undefined);
+      }
     },
 
     disconnect() {
