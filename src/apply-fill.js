@@ -7,8 +7,8 @@
  * the form and clicks Submit. After that, `submitted()` reports the
  * confirmation page, and the tab is closed by whoever opened it.
  *
- * The desktop agent uses this file. The Chrome extension keeps its own, older
- * copy (resume_extension/apply-fill.js), which only calls fill() and submitted().
+ * The desktop agent uses this file. The altv Chrome extension (Romva Apply,
+ * Alt+V) uses a copy of it (altv/apply-fill.js): change both together.
  *
  *   window.__romvaApply.state()                → { fields, application, password, signIn, sent }
  *   window.__romvaApply.fill(data)             → { filled, files, unfilledRequired, signIn }   (safe to call again)
