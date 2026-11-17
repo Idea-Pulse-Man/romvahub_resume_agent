@@ -76,6 +76,9 @@ PDFs attached.
   work authorisation, sponsorship and relocation. Fixed answers:
   - **Relocation:** always **No** (you do not move for work).
   - **Sponsorship:** No. **Authorised to work:** Yes.
+  - **Citizenship:** U.S. Citizen (country of citizenship: United States).
+  - **Student** (full-time or part-time): No.
+  - **Primary language:** English; a secondary language is left empty.
   - **Salary:** the middle of the pay range given in the job post or on the
     page; **150000** when none is given.
   - **How did you hear about us:** **Jobright AI** if offered, else a job

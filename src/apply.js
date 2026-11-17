@@ -30,7 +30,8 @@ import { log } from './log.js';
  * page) and filled at once; only when that is not clear does the banner ask
  * which job it is, and nothing is touched until you choose.
  *
- * Fixed answers: no relocation, no sponsorship; salary the middle of the
+ * Fixed answers: no relocation, no sponsorship; a U.S. citizen, not a
+ * student, primary language English (no secondary language); salary the middle of the
  * posted range (150000 when none); "how did you hear" Jobright AI or a job
  * board; a referrer's name never written.
  *
@@ -103,6 +104,9 @@ function questionsPrompt(job, questions, pageText) {
     [a.currentTitle, a.currentCompany].filter(Boolean).join(' at '),
     a.location && `based in ${a.location}`,
     a.noticePeriod && `notice period: ${a.noticePeriod}`,
+    'U.S. citizen',
+    'not a student',
+    'primary language: English',
     'does not want to relocate (move) for work',
   ].filter(Boolean);
   return [
@@ -119,6 +123,7 @@ function questionsPrompt(job, questions, pageText) {
     `- If the options include one like "I don't wish to answer", "Decline to self-identify" or "Prefer not to say", choose that one.`,
     '- The applicant is authorised to work and never needs visa sponsorship.',
     '- The applicant does not want to relocate: answer "No" to relocating or moving for the job.',
+    '- The applicant is a U.S. citizen (citizenship: "U.S. Citizen"; country of citizenship: United States), is not a student (full-time or part-time: "No"), and their primary language is English. Leave a secondary or other language empty.',
     '- "How did you hear about us": "Jobright AI" if offered, else a job board option; as text, write "Jobright AI".',
     '- Were you referred by someone: "No".',
     '- Yes/no questions about skills or experience: answer truthfully from the Resume.',

@@ -210,6 +210,8 @@
     const own = norm(`${labelOf(el)} ${el.name || ''}`);
     if (REFERRER.test(own)) return undefined; // a referrer's name is never written
     if (SOURCE.test(own)) return 'Jobright AI';
+    const fixed = fixedAnswer(own);
+    if (fixed) return fixed[0];
     if (el.type === 'email' || /e-?mail/.test(d)) return a.email;
     if (el.type === 'tel' || /phone|mobile|\bcell\b/.test(d)) return a.phone;
     if (/linkedin/.test(d)) return a.linkedin;
@@ -233,10 +235,36 @@
     return undefined;
   }
 
+  /**
+   * Facts fixed for every applicant: a U.S. citizen, not a student, English
+   * as the primary language. The answers to try, best first (option lists
+   * word them differently); a secondary language is left empty.
+   */
+  function fixedAnswer(d) {
+    if (/\b(secondary|second|other|additional) language/.test(d)) return undefined;
+    if (/\b(primary|first|native|main) language\b|mother tongue/.test(d)) return ['English'];
+    if (/\b(full|part)[\s-]?time student\b|\bare you (currently )?an? (current |enrolled )?student\b|\bcurrently (an? )?(student|enrolled)\b|\benrolled (as a student|in (an? )?(school|college|university|degree))/.test(d)) {
+      return ['No'];
+    }
+    // "Are you a citizen of Cuba, Iran…?" (export control) is not about U.S. citizenship: ChatGPT answers it.
+    // Whole phrases only: `d` may hold the field's option texts ("Other", "Non-U.S. Citizen").
+    if (/sanction|embargo|export control|\bitar\b|\bofac\b|\bcuba\b|\biran\b|north korea|\bsyria\b|crimea/.test(d)) return undefined;
+    if (/dual (citizen|national)|(other|another|additional|second|any) (countr(y|ies)|citizenships?|nationalit(y|ies))\b/.test(d)) return undefined;
+    if (/countr(y|ies) of (your )?citizenship|citizenship country|\bnationality\b/.test(d)) {
+      return ['United States', 'United States of America', 'USA', 'U.S.'];
+    }
+    if (/citizen/.test(d)) {
+      return ['U.S. Citizen', 'US Citizen', 'United States Citizen', 'Citizen of the United States', 'Yes'];
+    }
+    return undefined;
+  }
+
   /** Questions with a fixed answer for this applicant, which "I don't wish to answer" never overrides. */
   function ruleAnswer(d, a) {
     // The applicant never needs a visa sponsored, for any country.
     if (/sponsor/.test(d)) return 'No';
+    const fixed = fixedAnswer(d);
+    if (fixed) return fixed;
     if (/authori[sz]ed to work|legally (authori[sz]ed|eligible|able)|eligible to work|right to work/.test(d)) {
       return (a.authorizedCountries ?? []).length > 0 ? 'Yes' : undefined;
     }
@@ -288,8 +316,7 @@
         if (option) return option;
       }
     }
-    const ruled = ruleAnswer(question, a);
-    if (ruled) {
+    for (const ruled of [].concat(ruleAnswer(question, a) ?? [])) {
       const option = pick(list, ruled);
       if (option) return option;
     }
