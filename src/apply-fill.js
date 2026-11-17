@@ -21,10 +21,12 @@
  *   window.__romvaApply.takePick()             → the banner button clicked, once
  *
  * Only empty fields are filled, so calling fill() again as the page renders
- * more of the form never overwrites what the person typed. A question that
- * offers "I don't wish to answer" ("Decline to self-identify", "Prefer not to
- * say"…) gets that option, unless it is about work authorisation, sponsorship
- * or relocation. A sign-in page (one with a password box) is never touched.
+ * more of the form never overwrites what the person typed. Gender, race,
+ * veteran and disability questions get the Profile's answer; one the Profile
+ * leaves empty (or "Prefer not to say"), and any other question that offers
+ * "I don't wish to answer" ("Decline to self-identify", "Prefer not to say"…),
+ * gets that option, unless it is about work authorisation, sponsorship or
+ * relocation. A sign-in page (one with a password box) is never touched.
  */
 (() => {
   if (window.__romvaApply) return;
@@ -39,7 +41,7 @@
   const esc = (text) =>
     String(text ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-  /** An option meaning "I don't wish to answer": chosen whenever a question offers one. */
+  /** An option meaning "I don't wish to answer": chosen when a question offers one and the Profile has no answer. */
   const DECLINE = /(do not|don't|dont) (wish|want) to|wish not to|decline|prefer not|rather not|choose not to|not to (answer|say|disclose|specify|self[- ]?identify)/;
   /** A placeholder option ("Select…"), not an answer. */
   const PLACEHOLDER = /^(select|choose|please select|pick one|--|—|start typing)/;
@@ -284,19 +286,85 @@
     return undefined;
   }
 
-  /** Answers from the Profile, used when the question has no "I don't wish to answer" option. */
-  function profileAnswer(d, a) {
-    if (/hispanic|latin[oax]/.test(d)) {
-      if (!a.ethnicity) return undefined;
-      return /hispanic|latin/i.test(a.ethnicity) ? 'Yes' : 'No';
+  /** A Profile value meaning "I don't wish to answer" (or none): the question gets the form's decline option. */
+  const unset = (value) => !norm(value) || DECLINE.test(norm(value)) || /^other$/.test(norm(value));
+
+  /**
+   * The Profile's EEO choices (romva.space Profile → Male / Asian / I am not a
+   * veteran / No, I do not have a disability…) in the words job forms use for
+   * them, best first.
+   */
+  function genderAnswers(value) {
+    const v = norm(value);
+    if (unset(v)) return [];
+    if (/^(male|man)$/.test(v)) return ['Male', 'Man', 'Cisgender man', 'Cis man'];
+    if (/^(female|woman)$/.test(v)) return ['Female', 'Woman', 'Cisgender woman', 'Cis woman'];
+    if (/non[\s-]?binary/.test(v)) return ['Non-binary', 'Nonbinary', 'Non binary', 'Genderqueer'];
+    return [value];
+  }
+
+  function raceAnswers(value) {
+    const v = norm(value);
+    if (unset(v)) return [];
+    // The last answer serves "Are you Hispanic or Latino?" (Yes / No).
+    if (/hispanic|latin/.test(v)) return ['Hispanic or Latino', 'Hispanic/Latino', 'Hispanic', 'Latino', 'Latinx', 'Yes'];
+    const words = {
+      asian: ['Asian'],
+      white: ['White', 'Caucasian'],
+      black: ['Black or African American', 'Black', 'African American'],
+      'american indian': ['American Indian or Alaska Native', 'American Indian', 'Native American'],
+      'native hawaiian': ['Native Hawaiian or Other Pacific Islander', 'Native Hawaiian', 'Pacific Islander'],
+      'two or more': ['Two or More Races', 'Two or more', 'Multiracial', 'Multi-racial'],
+    };
+    const key = Object.keys(words).find((k) => v.includes(k));
+    return [...new Set([value, ...(key ? words[key] : []), 'No'])];
+  }
+
+  function veteranAnswers(value) {
+    const v = norm(value);
+    if (unset(v)) return [];
+    if (/\bnot\b|^no\b/.test(v)) {
+      return [
+        'I am not a veteran',
+        'I am not a protected veteran',
+        "I don't identify as a protected veteran",
+        'I do not identify as a protected veteran',
+        'I identify as not a protected veteran',
+        'Not a protected veteran',
+        'Not a veteran',
+        'No',
+      ];
     }
-    if (/\bgender\b|\bsex\b/.test(d)) return a.gender || undefined;
-    if (/\brace\b|ethnic/.test(d)) return a.ethnicity || undefined;
-    if (/veteran/.test(d)) return a.veteranStatus || undefined;
-    if (/disabilit/.test(d)) return a.disabilityStatus || undefined;
-    if (/country/.test(d)) return a.country || undefined;
-    if (/\bstate\b|province/.test(d)) return a.state || undefined;
-    return undefined;
+    return ['I am a veteran', 'I am a protected veteran', 'I identify as one or more of the classifications of protected veteran', 'Protected veteran', 'Yes'];
+  }
+
+  function disabilityAnswers(value) {
+    const v = norm(value);
+    if (unset(v)) return [];
+    if (/^no\b|do not|don't/.test(v)) {
+      return ['No, I do not have a disability', "No, I don't have a disability", 'I do not have a disability', "I don't have a disability", 'No'];
+    }
+    return ['Yes, I have a disability', 'Yes, I have a disability (or previously had a disability)', 'I have a disability', 'Yes'];
+  }
+
+  /**
+   * Answers from the Profile, best first; tried before the form's "I don't
+   * wish to answer". When the description names several (a field's text runs
+   * into its neighbours'), the one named first comes first.
+   */
+  function profileAnswer(d, a) {
+    const found = [];
+    const add = (pattern, answers) => {
+      const at = d.search(pattern);
+      if (at >= 0 && answers.length) found.push([at, answers]);
+    };
+    add(/\bgender\b|\bsex\b/, genderAnswers(a.gender));
+    add(/\brace\b|ethnic|hispanic|latin[oax]/, raceAnswers(a.ethnicity));
+    add(/veteran/, veteranAnswers(a.veteranStatus));
+    add(/disabilit/, disabilityAnswers(a.disabilityStatus));
+    add(/country/, a.country ? [a.country] : []);
+    add(/\bstate\b|province/, a.state ? [a.state] : []);
+    return found.sort((x, y) => x[0] - y[0]).flatMap(([, answers]) => answers);
   }
 
   const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -318,7 +386,16 @@
     );
   }
 
-  /** The option the rules choose: a fixed answer, else "I don't wish to answer", else the Profile's. */
+  /** The option matching the first answer that matches any. */
+  function pickAny(options, answers) {
+    for (const answer of [].concat(answers ?? [])) {
+      const option = pick(options, answer);
+      if (option) return option;
+    }
+    return null;
+  }
+
+  /** The option the rules choose: a fixed answer, else the Profile's (gender, race…), else "I don't wish to answer". */
   function choose(question, options, a) {
     const list = usable(options);
     if (SOURCE.test(question)) {
@@ -327,13 +404,18 @@
         if (option) return option;
       }
     }
-    for (const ruled of [].concat(ruleAnswer(question, a) ?? [])) {
-      const option = pick(list, ruled);
-      if (option) return option;
-    }
-    const declined = list.find((o) => DECLINE.test(o.text));
-    if (declined) return declined;
-    return pick(list, profileAnswer(question, a));
+    return (
+      pickAny(list, ruleAnswer(question, a)) ||
+      pickAny(list, profileAnswer(question, a)) ||
+      list.find((o) => DECLINE.test(o.text)) ||
+      null
+    );
+  }
+
+  /** A "select all that apply" group the Profile answers (race), else its "I don't wish to answer". */
+  function chooseInGroup(group, a) {
+    const options = choicesOf(group.members);
+    return pickAny(options, profileAnswer(norm(questionAround(group.key, group.members)), a)) || options.find((o) => DECLINE.test(o.text)) || null;
   }
 
   /** Radios / tick boxes as options: { el, text (for matching), label (as shown) }. */
@@ -704,11 +786,11 @@
       if (group.members.some((c) => c.checked) || doneGroups.has(group.key)) continue;
       const options = choicesOf(group.members);
       if (group.members.length > 1) {
-        const declined = options.find((o) => DECLINE.test(o.text));
-        if (declined) {
-          declined.el.click();
+        const chosen = chooseInGroup(group, a);
+        if (chosen) {
+          chosen.el.click();
           doneGroups.add(group.key);
-          mark(labelElement(declined.el) || declined.el);
+          mark(labelElement(chosen.el) || chosen.el);
           settled += 1;
           continue;
         }
@@ -904,14 +986,14 @@
       }
     }
 
-    // "Select all that apply" groups offering "I don't wish to answer".
+    // "Select all that apply" groups: the Profile's answer (race), else "I don't wish to answer".
     for (const group of checkboxGroups()) {
       if (group.members.length < 2 || doneGroups.has(group.key) || group.members.some((c) => c.checked)) continue;
-      const declined = choicesOf(group.members).find((o) => DECLINE.test(o.text));
-      if (declined) {
-        declined.el.click();
+      const chosen = chooseInGroup(group, a);
+      if (chosen) {
+        chosen.el.click();
         doneGroups.add(group.key);
-        mark(labelElement(declined.el) || declined.el);
+        mark(labelElement(chosen.el) || chosen.el);
         filled += 1;
       }
     }

@@ -71,9 +71,12 @@ PDFs attached.
 - **It never submits.** Check each tab, answer anything left, click Submit.
 - **The form's own questions** — text boxes, drop-downs, radios, tick boxes,
   Yes/No buttons — are answered by ChatGPT from the Resume and the job post,
-  in short plain answers. A question that offers "I don't wish to answer"
-  ("Decline to self-identify", "Prefer not to say"…) gets that option, except
-  work authorisation, sponsorship and relocation. Fixed answers:
+  in short plain answers. Gender, race, Hispanic/Latino, veteran and
+  disability questions get the Profile's answer, in the form's own words;
+  only when the Profile leaves one empty (or "Prefer not to say") does it get
+  "Decline to self-identify". Any other question that offers "I don't wish to
+  answer" ("Prefer not to say"…) gets that option, except work authorisation,
+  sponsorship and relocation. Fixed answers:
   - **Relocation:** always **No** (you do not move for work).
   - **Sponsorship:** No. **Authorised to work:** Yes.
   - **Citizenship:** U.S. Citizen (country of citizenship: United States).
