@@ -270,9 +270,25 @@ export function createChatGpt(settings) {
     throw new Error(`ChatGPT had not finished answering after ${settings.answerTimeoutMinutes} minutes.`);
   }
 
-  return {
-    /** One message in a new chat, in its own tab; returns the answer. */
-    async ask(message) {
+  /**
+   * One chat at a time: a Resume being made and a form's questions take turns.
+   * `first` (a form someone is looking at) goes ahead of the chats waiting.
+   */
+  const queue = [];
+  let busy = false;
+
+  const self = {
+    /** One message in a new chat, in its own tab; returns the answer. Chats wait their turn. */
+    ask(message, { first = false } = {}) {
+      return new Promise((resolve, reject) => {
+        const item = { message, resolve, reject };
+        if (first) queue.unshift(item);
+        else queue.push(item);
+        pump();
+      });
+    },
+
+    async askNow(message) {
       let page;
       try {
         page = await (await browser()).newPage();
@@ -322,14 +338,14 @@ export function createChatGpt(settings) {
     },
 
     /**
-     * A job's application page in a window of its own (for Apply), so the
-     * person can check them one by one apart from the ChatGPT tabs.
+     * A job's application page as a new tab in the agent's Chrome window (for
+     * Apply), opened in the background so the tab in front is not taken away.
      */
     async openWindow(url) {
       const b = await browser();
       const session = await b.target().createCDPSession();
       try {
-        const { targetId } = await session.send('Target.createTarget', { url, newWindow: true, background: true });
+        const { targetId } = await session.send('Target.createTarget', { url, newWindow: false, background: true });
         const target = await b.waitForTarget((t) => t._targetId === targetId, { timeout: 30_000 });
         return await target.page();
       } catch {
@@ -341,8 +357,33 @@ export function createChatGpt(settings) {
       }
     },
 
+    /** The tabs open in the agent's Chrome; [] when that Chrome is not running (it is not started for this). */
+    async tabs() {
+      try {
+        if (!connection && !(await debuggerUp())) return [];
+        return await (await browser()).pages();
+      } catch {
+        return [];
+      }
+    },
+
     disconnect() {
       connection?.then((b) => b.disconnect()).catch(() => undefined);
     },
   };
+
+  function pump() {
+    if (busy || !queue.length) return;
+    busy = true;
+    const item = queue.shift();
+    self
+      .askNow(item.message)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        busy = false;
+        pump();
+      });
+  }
+
+  return self;
 }
