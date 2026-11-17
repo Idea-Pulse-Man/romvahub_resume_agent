@@ -3,7 +3,6 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
-import { createApplier } from './apply.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
 import { DATA_DIR, loadConfig, loadSession } from './config.js';
 import { log } from './log.js';
@@ -115,8 +114,7 @@ async function saveQuietly(saveDir, job, files, what) {
 /**
  * While an application is being made, check in every minute: romva.space
  * shows this computer as running, and the hold on the application is renewed
- * so a slow ChatGPT (or form questions from Apply ahead of it) does not lose
- * it to another worker.
+ * so a slow ChatGPT does not lose it to another worker.
  */
 function keepHolding(api, job) {
   let warned = false;
@@ -216,12 +214,6 @@ async function main() {
       if (released > 0) log.info(`Handed back ${released} application(s) left by the previous run`);
     })
     .catch((error) => log.warn('Could not hand back the previous run\'s applications', { error: error.message }));
-
-  // Apply runs alongside, in tabs of its own (apply.js), while Start apply is
-  // on at romva.space; it never submits.
-  if (config.apply.enabled && !once) {
-    void createApplier(api, chatgpt, config.apply).run();
-  }
 
   let waitingForChatGpt = false;
   let stoppedLogged = false;

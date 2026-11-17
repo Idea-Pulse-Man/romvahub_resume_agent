@@ -29,15 +29,6 @@ export const DEFAULTS = {
   workerName: `agent · ${hostname()}`,
   /** How often to ask for the next application when idle, in seconds. */
   pollSeconds: 20,
-  /**
-   * Apply: open each ready application's job page in its own window, filled
-   * in, for you to check and submit. Off unless turned on here.
-   */
-  apply: {
-    enabled: false,
-    /** Job windows open at once. */
-    tabs: 3,
-  },
   /** The Chrome window the agent uses for ChatGPT. */
   chrome: {
     path: '',
@@ -67,7 +58,6 @@ export function loadConfig() {
   return {
     ...DEFAULTS,
     ...saved,
-    apply: { ...DEFAULTS.apply, ...(saved.apply ?? {}) },
     chrome: { ...DEFAULTS.chrome, ...(saved.chrome ?? {}) },
   };
 }

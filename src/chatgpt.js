@@ -278,20 +278,15 @@ export function createChatGpt(settings) {
     throw new Error(`ChatGPT had not finished answering after ${settings.answerTimeoutMinutes} minutes.`);
   }
 
-  /**
-   * One chat at a time: a Resume being made and a form's questions take turns.
-   * `first` (a form someone is looking at) goes ahead of the chats waiting.
-   */
+  /** One chat at a time: the Resume, then its cover letter. */
   const queue = [];
   let busy = false;
 
   const self = {
     /** One message in a new chat, in its own tab; returns the answer. Chats wait their turn. */
-    ask(message, { first = false } = {}) {
+    ask(message) {
       return new Promise((resolve, reject) => {
-        const item = { message, resolve, reject };
-        if (first) queue.unshift(item);
-        else queue.push(item);
+        queue.push({ message, resolve, reject });
         pump();
       });
     },
@@ -343,36 +338,6 @@ export function createChatGpt(settings) {
       const page = pages.find((p) => /chatgpt\.com/.test(p.url())) ?? pages[0] ?? (await (await browser()).newPage());
       await page.bringToFront();
       if (!/chatgpt\.com/.test(page.url())) await page.goto(settings.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    },
-
-    /**
-     * A job's application page as a new tab in the agent's Chrome window (for
-     * Apply), opened in the background so the tab in front is not taken away.
-     */
-    async openWindow(url) {
-      const b = await browser();
-      const session = await b.target().createCDPSession();
-      try {
-        const { targetId } = await session.send('Target.createTarget', { url, newWindow: false, background: true });
-        const target = await b.waitForTarget((t) => t._targetId === targetId, { timeout: 30_000 });
-        return await target.page();
-      } catch {
-        const page = await b.newPage();
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
-        return page;
-      } finally {
-        await session.detach().catch(() => undefined);
-      }
-    },
-
-    /** The tabs open in the agent's Chrome; [] when that Chrome is not running (it is not started for this). */
-    async tabs() {
-      try {
-        if (!connection && !(await debuggerUp())) return [];
-        return await (await browser()).pages();
-      } catch {
-        return [];
-      }
     },
 
     disconnect() {
