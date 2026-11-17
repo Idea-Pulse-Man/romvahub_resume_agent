@@ -75,6 +75,9 @@ export function createApi(baseUrl) {
       authed(`/api/auto-make/jobs/${bidId}/resume`, { method: 'POST', body: { answer } }),
     submitCoverLetter: (bidId, answer) =>
       authed(`/api/auto-make/jobs/${bidId}/cover-letter`, { method: 'POST', body: { answer } }),
+    applyNext: (limit, skip) =>
+      authed(`/api/auto-make/apply/next?limit=${limit}&skip=${encodeURIComponent(skip.join(','))}`),
+    applyData: (bidId) => authed(`/api/auto-make/apply/${bidId}`),
     release: (bidId, failed, error) =>
       authed(`/api/auto-make/jobs/${bidId}/release`, {
         method: 'POST',
