@@ -70,6 +70,8 @@ export function createApi(baseUrl) {
       return data.user;
     },
     me: () => authed('/api/auth/me'),
+    /** The switches on romva.space: { enabled (Start resume), applyEnabled (Start apply), … }. */
+    status: () => authed('/api/auto-make'),
     claim: (worker) => authed('/api/auto-make/claim', { method: 'POST', body: { worker } }),
     submitResume: (bidId, answer) =>
       authed(`/api/auto-make/jobs/${bidId}/resume`, { method: 'POST', body: { answer } }),

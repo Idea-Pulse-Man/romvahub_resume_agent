@@ -121,7 +121,8 @@ async function main() {
     api: config.apiUrl,
   });
 
-  // Apply runs alongside, in windows of its own (apply.js); it never submits.
+  // Apply runs alongside, in tabs of its own (apply.js), while Start apply is
+  // on at romva.space; it never submits.
   if (config.apply.enabled && !once) {
     void createApplier(api, chatgpt, config.apply).run();
   }
