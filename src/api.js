@@ -84,8 +84,6 @@ export function createApi(baseUrl, worker) {
       return data.user;
     },
     me: () => authed('/api/auth/me'),
-    /** The switches on romva.space: { enabled (Start resume), applyEnabled (Start apply), … }. */
-    status: () => authed('/api/auto-make'),
     /** The next application; `letterOnly` jobs (a stored Resume missing its cover letter) included. */
     claim: () => authed('/api/auto-make/claim', { method: 'POST', body: { worker, letterOnlyJobs: true } }),
     submitResume: (bidId, answer) =>
@@ -104,9 +102,6 @@ export function createApi(baseUrl, worker) {
       }),
     /** On start: whatever this computer's previous run held is free again at once. */
     releaseHeld: () => authed('/api/auto-make/release-held', { method: 'POST', body: { worker } }),
-    applyNext: (limit, skip) =>
-      authed(`/api/auto-make/apply/next?limit=${limit}&skip=${encodeURIComponent(skip.join(','))}`),
-    applyData: (bidId) => authed(`/api/auto-make/apply/${bidId}`),
     release: (bidId, failed, error) =>
       authed(`/api/auto-make/jobs/${bidId}/release`, {
         method: 'POST',
