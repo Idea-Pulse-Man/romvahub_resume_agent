@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
-import { DATA_DIR, loadConfig, loadSession } from './config.js';
+import { CREDENTIALS_FILE, DATA_DIR, loadConfig, loadCredentials, loadSession } from './config.js';
 import { log } from './log.js';
 
 /**
@@ -143,23 +143,18 @@ async function makeLetter(api, chatgpt, config, job, message) {
       const letterAnswer = await chatgpt.ask(message);
       letter = await api.submitCoverLetter(job.bidId, letterAnswer);
     } catch (error) {
+      // ChatGPT cannot be used (signed out…): no second try now. The agent
+      // pauses, and the application comes back as a letter-only job — uncounted.
+      if (error instanceof ChatGptUnavailable) throw error;
       if ((error instanceof ApiError && error.status === 409) || isTemporary(error)) throw error;
       lastError = error;
       log.warn(`Cover letter attempt ${attempt} failed`, { company: job.company, error: error.message });
-      // ChatGPT unavailable between the two chats: the Resume is already in, so
-      // wait for ChatGPT here (up to 10 minutes) rather than leave the letter out.
-      if (error instanceof ChatGptUnavailable && attempt === 1) {
-        const deadline = Date.now() + 10 * 60_000;
-        while (Date.now() < deadline && !(await chatgpt.ready())) await sleep(15_000);
-      }
       continue;
     }
     await saveQuietly(config.saveDir, job, letter.files, 'Cover letter');
     log.info('Done', { company: job.company });
     return;
   }
-  // Handed back uncounted, to come back as a letter-only job once ChatGPT is back.
-  if (lastError instanceof ChatGptUnavailable) throw lastError;
   // The Resume is in; the letter is counted as failed and tried again later on its own.
   throw new Error(`Cover letter: ${lastError?.message ?? 'failed'}`);
 }
@@ -184,8 +179,8 @@ async function makeOne(api, chatgpt, config, job) {
 
 async function main() {
   const config = loadConfig();
-  if (!loadSession()) {
-    log.error('Not signed in to romva.space. Run setup first: npm run setup');
+  if (!loadSession() && !loadCredentials()) {
+    log.error(`Not signed in to romva.space. Put the email and password in ${CREDENTIALS_FILE}, or run setup: npm run setup`);
     process.exit(1);
   }
   if (!singleInstance()) {
@@ -218,12 +213,18 @@ async function main() {
   let waitingForChatGpt = false;
   let stoppedLogged = false;
   let checkedInAt = 0;
+  // Paused for ChatGPT: not before `resumeAfter`. A pause that comes back
+  // soon after resuming doubles the wait (30 s, 1, 2, 4, 8, 10 min), so a
+  // ChatGPT that keeps failing is never retried every few seconds.
+  let pauses = 0;
+  let resumedAt = 0;
+  let resumeAfter = 0;
 
   while (true) {
     try {
       // Signed out of ChatGPT last time: look at the window (no reload) until it is back.
       if (waitingForChatGpt) {
-        if (!(await chatgpt.ready())) {
+        if (Date.now() < resumeAfter || !(await chatgpt.ready())) {
           // Still check in, so romva.space shows this computer as up (and why it waits).
           if (Date.now() - checkedInAt >= HEARTBEAT_MS) {
             checkedInAt = Date.now();
@@ -233,6 +234,7 @@ async function main() {
           continue;
         }
         waitingForChatGpt = false;
+        resumedAt = Date.now();
         log.info('ChatGPT is ready again');
       }
 
@@ -254,7 +256,10 @@ async function main() {
         await makeOne(api, chatgpt, config, job);
       } catch (error) {
         if (error instanceof ChatGptUnavailable) {
-          log.warn(`Paused: ${error.message}`);
+          pauses = resumedAt && Date.now() - resumedAt < 10 * 60_000 ? pauses + 1 : 1;
+          const holdMs = Math.min(10 * 60_000, 30_000 * 2 ** (pauses - 1));
+          resumeAfter = Date.now() + holdMs;
+          log.warn(`Paused: ${error.message} Trying again in ${Math.round(holdMs / 1000)} s at the earliest.`);
           waitingForChatGpt = true;
           await api.release(job.bidId, false, error.message).catch(() => undefined);
         } else if (error instanceof ApiError && error.status === 409) {
@@ -278,10 +283,11 @@ async function main() {
       if (once) return;
     } catch (error) {
       // romva.space unreachable, signed out of it, the network down: wait and try again.
-      log.error('Could not reach romva.space', { error: error.message });
-      if (error instanceof ApiError && error.status === 401) {
-        log.error('The romva.space sign-in has expired. Run setup again: npm run setup');
-      }
+      // A 401 here already says what to do (credentials.txt, or setup).
+      log.error(
+        error instanceof ApiError && error.status === 401 ? 'Not signed in to romva.space' : 'Could not reach romva.space',
+        { error: error.message },
+      );
       await sleep(Math.max(60, config.pollSeconds) * 1000);
     }
   }

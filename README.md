@@ -17,8 +17,10 @@ For each application it:
 
 Each chat is a temporary chat in its own tab, closed when it is done.
 
-If the cover letter fails after the Resume is made, the application comes back
-later for its cover letter alone. If the files cannot be written to the save
+Applications are taken in the order of the Applications list (No 1, 2, 3…).
+For each one the agent makes whatever is missing — the Resume and cover
+letter, or just the cover letter if the Resume is already there (it failed,
+or the agent was stopped in between) — and then goes on to the next. If the files cannot be written to the save
 folder (a path too long, a full disk), they are still on romva.space and the
 work carries on.
 
@@ -38,6 +40,22 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 Setup asks for the romva.space address, email and password (the password is
 used once and not stored), the save folder, and this computer's name; then a
 Chrome window opens on chatgpt.com — sign in there once.
+
+### Signing in again by itself — `credentials.txt`
+
+romva.space can end the agent's sign-in (for example when the same account
+is signed out elsewhere). To have the agent sign in again on its own, copy
+`credentials.example.txt` to `credentials.txt` in this folder and fill it in:
+
+```
+email=you@example.com
+password=your password
+```
+
+It is read only when the sign-in has ended, and read afresh each time, so it
+can be edited while the agent runs. A refused email or password is tried
+again after 5 minutes. `credentials.txt` holds the password in plain text:
+it is kept out of git (`.gitignore`), so keep it on this computer only.
 
 ## Use
 
