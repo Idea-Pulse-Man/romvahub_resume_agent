@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
-import { DATA_DIR, loadConfig, loadSession } from './config.js';
+import { CREDENTIALS_FILE, DATA_DIR, loadConfig, loadCredentials, loadSession } from './config.js';
 import { log } from './log.js';
 
 /**
@@ -184,8 +184,8 @@ async function makeOne(api, chatgpt, config, job) {
 
 async function main() {
   const config = loadConfig();
-  if (!loadSession()) {
-    log.error('Not signed in to romva.space. Run setup first: npm run setup');
+  if (!loadSession() && !loadCredentials()) {
+    log.error(`Not signed in to romva.space. Put the email and password in ${CREDENTIALS_FILE}, or run setup: npm run setup`);
     process.exit(1);
   }
   if (!singleInstance()) {
@@ -278,10 +278,11 @@ async function main() {
       if (once) return;
     } catch (error) {
       // romva.space unreachable, signed out of it, the network down: wait and try again.
-      log.error('Could not reach romva.space', { error: error.message });
-      if (error instanceof ApiError && error.status === 401) {
-        log.error('The romva.space sign-in has expired. Run setup again: npm run setup');
-      }
+      // A 401 here already says what to do (credentials.txt, or setup).
+      log.error(
+        error instanceof ApiError && error.status === 401 ? 'Not signed in to romva.space' : 'Could not reach romva.space',
+        { error: error.message },
+      );
       await sleep(Math.max(60, config.pollSeconds) * 1000);
     }
   }

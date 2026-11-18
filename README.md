@@ -41,6 +41,22 @@ Setup asks for the romva.space address, email and password (the password is
 used once and not stored), the save folder, and this computer's name; then a
 Chrome window opens on chatgpt.com — sign in there once.
 
+### Signing in again by itself — `credentials.txt`
+
+romva.space can end the agent's sign-in (for example when the same account
+is signed out elsewhere). To have the agent sign in again on its own, copy
+`credentials.example.txt` to `credentials.txt` in this folder and fill it in:
+
+```
+email=you@example.com
+password=your password
+```
+
+It is read only when the sign-in has ended, and read afresh each time, so it
+can be edited while the agent runs. A refused email or password is tried
+again after 5 minutes. `credentials.txt` holds the password in plain text:
+it is kept out of git (`.gitignore`), so keep it on this computer only.
+
 ## Use
 
 - **Start resume / Stop** on the romva.space Applications page turns Resume
