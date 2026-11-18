@@ -66,6 +66,24 @@ const IN_PAGE = {
     return isField ? editor.value : editor.innerText;
   })()`,
   signedOut: `Array.from(document.querySelectorAll('button, a')).some((el) => /^log in$/i.test((el.innerText || '').trim()))`,
+  /**
+   * The sign-in as chatgpt.com's own session endpoint has it, fetched fresh:
+   * 'in', 'out', or 'unknown' when it does not answer as expected. Unlike the
+   * page's buttons, it is right even on a tab still loading (which shows
+   * "Log in" for a moment) or one open since before a sign-out.
+   */
+  session: `(async () => {
+    try {
+      const response = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
+      if (!response.ok) return 'unknown';
+      const session = await response.json();
+      if (!session || typeof session !== 'object') return 'unknown';
+      if (session.user || session.accessToken) return 'in';
+      return Object.keys(session).length === 0 ? 'out' : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  })()`,
   freshChat: `(() => !location.pathname.startsWith('/c/')
     && document.querySelectorAll('pre').length === 0
     && !/(You said:|ChatGPT said:)/.test(document.body.innerText || ''))()`,
@@ -180,6 +198,25 @@ export function createChatGpt(settings) {
     }
   }
 
+  /**
+   * Whether `page` (a chatgpt.com tab) is signed in — the one check used both
+   * before a chat and while waiting, so the two never disagree. The session
+   * endpoint decides; only when it gives no answer does the page decide, and
+   * then a "Log in" button must still be there after a few seconds (a
+   * signed-in page shows one for a moment while it loads).
+   */
+  async function signedIn(page) {
+    const state = await page.evaluate(IN_PAGE.session).catch(() => 'unknown');
+    if (state !== 'unknown') return state === 'in';
+    const deadline = Date.now() + 8000;
+    while (true) {
+      const loaded = await page.evaluate(`!!document.querySelector(${JSON.stringify(SELECTORS.composer)})`);
+      if (loaded && !(await page.evaluate(IN_PAGE.signedOut))) return true;
+      if (Date.now() > deadline) return false;
+      await sleep(1000);
+    }
+  }
+
   async function waitFresh(page) {
     const deadline = Date.now() + 20_000;
     while (Date.now() < deadline) {
@@ -230,7 +267,7 @@ export function createChatGpt(settings) {
     } catch {
       throw new ChatGptUnavailable('ChatGPT did not load. Check the Chrome window (sign in, or a "verify you are human" check).');
     }
-    if (await page.evaluate(IN_PAGE.signedOut)) {
+    if (!(await signedIn(page))) {
       throw new ChatGptUnavailable('ChatGPT is not signed in. Sign in on chatgpt.com in the agent\'s Chrome window.');
     }
     if (!(await waitFresh(page))) {
@@ -282,6 +319,17 @@ export function createChatGpt(settings) {
   const queue = [];
   let busy = false;
 
+  /**
+   * The tab left open when ChatGPT could not be used (signed out, a "verify
+   * you are human" check), for the person to sign in there. Only one: an
+   * earlier one is closed when a new one is kept, so tabs do not pile up.
+   */
+  let signInTab = null;
+  async function keepForSignIn(page) {
+    if (signInTab && signInTab !== page && !signInTab.isClosed()) await signInTab.close().catch(() => undefined);
+    signInTab = page;
+  }
+
   const self = {
     /** One message in a new chat, in its own tab; returns the answer. Chats wait their turn. */
     ask(message) {
@@ -310,23 +358,39 @@ export function createChatGpt(settings) {
         }
         throw error;
       } finally {
-        if (!keepOpen && page) await closeChat(page);
+        if (page) {
+          if (keepOpen) await keepForSignIn(page);
+          else await closeChat(page);
+        }
       }
     },
 
-    /** Whether ChatGPT is ready, from the open tabs only — nothing reloaded, so a sign-in is never interrupted. */
+    /**
+     * Whether ChatGPT is ready — the same check as before a chat, on the tab
+     * kept for signing in (else any chatgpt.com tab). Nothing is reloaded, so
+     * a sign-in in progress is never interrupted.
+     */
     async ready() {
       try {
         const pages = await (await browser()).pages();
-        const chat = pages.find((page) => /chatgpt\.com|chat\.openai\.com/.test(page.url()));
+        const isChat = (page) => /chatgpt\.com|chat\.openai\.com/.test(page.url());
+        const kept = signInTab && !signInTab.isClosed() ? signInTab : null;
+        // The person is signing in on the kept tab (it has left chatgpt.com): wait.
+        if (kept && !isChat(kept)) return false;
+        const chat = kept ?? pages.find(isChat);
         if (!chat) {
           if (pages.some((page) => /openai\.com|google\.com|apple\.com|live\.com/.test(page.url()))) return false;
           const page = pages[0] ?? (await (await browser()).newPage());
           await page.goto(settings.url, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
           return false;
         }
-        if (!(await chat.evaluate(`!!document.querySelector(${JSON.stringify(SELECTORS.composer)})`))) return false;
-        return !(await chat.evaluate(IN_PAGE.signedOut));
+        if (!(await signedIn(chat))) return false;
+        // Signed in: the kept tab has done its job.
+        if (kept) {
+          signInTab = null;
+          await closeChat(kept);
+        }
+        return true;
       } catch {
         return false;
       }
