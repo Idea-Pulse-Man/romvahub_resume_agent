@@ -17,8 +17,10 @@ For each application it:
 
 Each chat is a temporary chat in its own tab, closed when it is done.
 
-If the cover letter fails after the Resume is made, the application comes back
-later for its cover letter alone. If the files cannot be written to the save
+Applications are taken in the order of the Applications list (No 1, 2, 3…).
+For each one the agent makes whatever is missing — the Resume and cover
+letter, or just the cover letter if the Resume is already there (it failed,
+or the agent was stopped in between) — and then goes on to the next. If the files cannot be written to the save
 folder (a path too long, a full disk), they are still on romva.space and the
 work carries on.
 

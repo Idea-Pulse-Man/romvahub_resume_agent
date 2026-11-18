@@ -57,21 +57,35 @@ export function createApi(baseUrl, worker) {
     return data;
   }
 
-  async function refresh() {
-    if (!session?.refreshToken) throw new ApiError(401, 'Not signed in. Run setup again.');
-    const data = await call('/api/auth/refresh', { method: 'POST', body: { refreshToken: session.refreshToken } });
-    session = { ...session, accessToken: data.accessToken, refreshToken: data.refreshToken, user: data.user };
-    saveSession(session);
+  /**
+   * The refresh token is single-use (renewed each time), so two calls that hit
+   * a 401 together (the job and its keep-alive timer) must share one refresh:
+   * a second refresh with the same token is refused and signs the agent out.
+   */
+  let refreshing = null;
+  function refresh() {
+    refreshing ??= (async () => {
+      if (!session?.refreshToken) throw new ApiError(401, 'Not signed in. Run setup again.');
+      const data = await call('/api/auth/refresh', { method: 'POST', body: { refreshToken: session.refreshToken } });
+      session = { ...session, accessToken: data.accessToken, refreshToken: data.refreshToken, user: data.user };
+      saveSession(session);
+    })().finally(() => {
+      refreshing = null;
+    });
+    return refreshing;
   }
 
   /** A call as the signed-in person; an expired access token is renewed once and the call retried. */
   async function authed(path, options = {}) {
+    if (refreshing) await refreshing;
     if (!session?.accessToken) await refresh();
+    const token = session.accessToken;
     try {
-      return await call(path, { ...options, token: session.accessToken });
+      return await call(path, { ...options, token });
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401) throw error;
-      await refresh();
+      // Renewed by another call while this one was out: just retry with the new token.
+      if (session.accessToken === token) await refresh();
       return call(path, { ...options, token: session.accessToken });
     }
   }
