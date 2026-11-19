@@ -33,6 +33,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** How often the agent checks in while busy: well inside romva.space's 2-minute "online" and 15-minute hold. */
 const HEARTBEAT_MS = 60_000;
+/** The longest wait between asks when there is nothing to make (romva.space shows the agent online within 4 minutes). */
+const MAX_IDLE_WAIT_MS = 3 * 60_000;
+/** How often to ask while romva.space is at Stop. */
+const STOPPED_WAIT_MS = 2 * 60_000;
 
 /**
  * Whether `pid` is a running Node process. A lock left by an agent that was
@@ -219,10 +223,16 @@ async function main() {
   });
   log.info(`Romva Resume Agent started`, {
     profile: me?.token?.profile?.name,
+    tokenExpires: me?.token?.expiresAt?.slice(0, 10) ?? 'never',
     worker: config.workerName,
     saveDir: config.saveDir,
     api: config.apiUrl,
   });
+
+  const tokenDaysLeft = me?.token?.expiresAt ? Math.ceil((Date.parse(me.token.expiresAt) - Date.now()) / 86_400_000) : null;
+  if (tokenDaysLeft !== null && tokenDaysLeft <= 7) {
+    log.warn(`The Romva token expires in ${tokenDaysLeft} day(s). ${TOKEN_HELP}`);
+  }
 
   // Whatever this computer's previous run was making when it stopped is free
   // again at once, rather than after romva.space's 15-minute hold runs out.
@@ -242,6 +252,8 @@ async function main() {
   let pauses = 0;
   let resumedAt = 0;
   let resumeAfter = 0;
+  // How long to wait before asking again when there was nothing to make.
+  let idleWaitMs = config.pollSeconds * 1000;
 
   while (true) {
     try {
@@ -265,15 +277,22 @@ async function main() {
       if (!enabled) {
         if (!stoppedLogged) log.info('Auto resume is at Stop on romva.space; waiting for Start');
         stoppedLogged = true;
-        await sleep(config.pollSeconds * 1000);
+        idleWaitMs = config.pollSeconds * 1000;
+        // At Stop nothing will be handed out: ask again only every 2 minutes.
+        await sleep(Math.max(config.pollSeconds * 1000, STOPPED_WAIT_MS));
         continue;
       }
       stoppedLogged = false;
       if (!job) {
         if (once) return;
-        await sleep(config.pollSeconds * 1000);
+        // Nothing to make: wait a little longer each time (20 s, 40 s, 80 s … 3 min),
+        // so an idle agent asks about 20 times an hour instead of 180.
+        await sleep(idleWaitMs);
+        idleWaitMs = Math.min(idleWaitMs * 2, MAX_IDLE_WAIT_MS);
         continue;
       }
+      // Work found: back to asking quickly.
+      idleWaitMs = config.pollSeconds * 1000;
 
       try {
         await makeOne(api, chatgpt, config, job);

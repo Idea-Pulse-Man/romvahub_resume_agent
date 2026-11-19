@@ -49,9 +49,10 @@ a token for one Profile, made by the Super Admin on romva.space → **Tokens**
 makes that Profile's Resumes and cover letters, and sees nothing else.
 
 The token is kept in `%APPDATA%\RomvaResumeAgent\config.json` (`"token"`), or
-taken from the `ROMVA_TOKEN` environment variable. It never expires; when the
-Super Admin revokes it, the agent logs "The Romva token was refused" — run
-`npm run setup` again with a new one. (An old `credentials.txt` is no longer
+taken from the `ROMVA_TOKEN` environment variable. It expires on the date the
+Super Admin chose (the agent warns in its log during the last week); when it
+has expired or been revoked, the agent logs "The Romva token was refused" —
+run `npm run setup` again with a new one. (An old `credentials.txt` is no longer
 read and can be deleted.)
 
 ## Use
