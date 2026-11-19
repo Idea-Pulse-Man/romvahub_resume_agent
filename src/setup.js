@@ -16,19 +16,20 @@ async function askHidden(question) {
     stdin.setRawMode?.(true);
     stdin.resume();
     stdin.setEncoding('utf8');
-    const onData = (char) => {
-      if (char === '\r' || char === '\n' || char === '\u0004') {
-        stdin.setRawMode?.(false);
-        stdin.pause();
-        stdin.off('data', onData);
-        stdout.write('\n');
-        resolve(value);
-      } else if (char === '\u0003') {
-        process.exit(1);
-      } else if (char === '\u0008' || char === '\u007f') {
-        value = value.slice(0, -1);
-      } else {
-        value += char;
+    // A paste arrives as one chunk (maybe ending in Enter): look at each character.
+    const onData = (chunk) => {
+      for (const char of chunk) {
+        if (char === '\r' || char === '\n' || char === '\u0004') {
+          stdin.setRawMode?.(false);
+          stdin.pause();
+          stdin.off('data', onData);
+          stdout.write('\n');
+          resolve(value);
+          return;
+        }
+        if (char === '\u0003') process.exit(1);
+        if (char === '\u0008' || char === '\u007f') value = value.slice(0, -1);
+        else value += char;
       }
     };
     stdin.on('data', onData);

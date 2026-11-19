@@ -204,11 +204,35 @@ async function makeOne(api, chatgpt, config, job) {
   }
 }
 
+/** Exit code for "the token is missing or refused": restarting will not help (the GUI waits for a new token). */
+const EXIT_TOKEN = 2;
+
+/**
+ * Who the token is, asked at start. romva.space unreachable (the network not
+ * up yet at Windows sign-in, a short outage): wait and ask again, rather than
+ * exit. Only a missing or refused token stops the agent.
+ */
+async function whoAmI(api) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await api.me();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        log.error('The Romva token was refused', { error: error.message });
+        process.exit(EXIT_TOKEN);
+      }
+      const waitS = Math.min(60, 5 * attempt);
+      log.warn(`Could not reach romva.space at start; trying again in ${waitS} s`, { error: error.message });
+      await sleep(waitS * 1000);
+    }
+  }
+}
+
 async function main() {
   const config = loadConfig();
   if (!config.token) {
     log.error(`No Romva token. ${TOKEN_HELP}`);
-    process.exit(1);
+    process.exit(EXIT_TOKEN);
   }
   if (!singleInstance()) {
     log.info('Another Romva Resume Agent is already running on this computer; exiting.');
@@ -217,10 +241,7 @@ async function main() {
 
   const api = createApi(config.apiUrl, config.workerName, config.token);
   const chatgpt = createChatGpt(config.chrome);
-  const me = await api.me().catch((error) => {
-    log.error('romva.space did not take the Romva token', { error: error.message });
-    process.exit(1);
-  });
+  const me = await whoAmI(api);
   log.info(`Romva Resume Agent started`, {
     profile: me?.token?.profile?.name,
     tokenExpires: me?.token?.expiresAt?.slice(0, 10) ?? 'never',
@@ -326,10 +347,11 @@ async function main() {
     } catch (error) {
       // romva.space unreachable, the token revoked, the network down: wait and try again.
       // A 401 here already says what to do (a new token, and setup).
-      log.error(
-        error instanceof ApiError && error.status === 401 ? 'The Romva token was refused' : 'Could not reach romva.space',
-        { error: error.message },
-      );
+      let what = 'Unexpected error, trying again';
+      if (error instanceof ApiError) {
+        what = error.status === 401 ? 'The Romva token was refused' : error.status === 0 ? 'Could not reach romva.space' : 'romva.space error';
+      }
+      log.error(what, { error: error instanceof ApiError ? error.message : error?.stack ?? String(error) });
       await sleep(Math.max(60, config.pollSeconds) * 1000);
     }
   }

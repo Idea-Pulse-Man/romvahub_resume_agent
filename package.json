@@ -11,7 +11,8 @@
   "scripts": {
     "setup": "node src/setup.js",
     "start": "node src/agent.js",
-    "once": "node src/agent.js --once"
+    "once": "node src/agent.js --once",
+    "gui": "powershell -ExecutionPolicy Bypass -File gui/build.ps1"
   },
   "dependencies": {
     "puppeteer-core": "^25.9.0"

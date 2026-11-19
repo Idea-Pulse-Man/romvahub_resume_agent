@@ -20,8 +20,8 @@ export const LOG_FILE = path.join(DATA_DIR, 'agent.log');
 
 /** What to do about a missing or refused token. */
 export const TOKEN_HELP =
-  "Ask the Super Admin for your Profile's token (romva.space → Tokens), then run setup again: npm run setup " +
-  '(or put it in config.json as "token", or set ROMVA_TOKEN).';
+  "Ask the Super Admin for your Profile's token (romva.space → Tokens), then click “Change token…” in the " +
+  'Romva Resume Agent window (or run npm run setup).';
 
 export const DEFAULTS = {
   /** The romva.space site (its /api is the backend). */

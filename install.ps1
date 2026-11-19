@@ -1,9 +1,9 @@
 # Romva Resume Agent - install for the current Windows user.
 #
 #   1. installs the agent's one dependency (puppeteer-core)
-#   2. runs setup: the Romva token, save folder, ChatGPT sign-in
-#   3. registers a logon task, so the agent starts by itself (hidden) at every sign-in
-#   4. starts it now
+#   2. builds the window (gui\RomvaAgent.exe, ~35 KB, with the C# compiler that comes with Windows)
+#   3. makes the window start with Windows (in the tray); it runs the agent and restarts it if it stops
+#   4. opens the window: click "Change token..." and paste the Romva token
 #
 # Run from this folder:  powershell -ExecutionPolicy Bypass -File .\install.ps1
 
@@ -26,20 +26,22 @@ Write-Host 'Installing...'
 npm install --omit=dev --no-audit --no-fund
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
-Write-Host ''
-node src/setup.js
+# A window already open holds the .exe: close it (the agent itself keeps running; the new window picks it up).
+Get-Process RomvaAgent -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 500
+powershell -ExecutionPolicy Bypass -File "$here\gui\build.ps1"
 if ($LASTEXITCODE -ne 0) { exit 1 }
+$exe = Join-Path $here 'gui\RomvaAgent.exe'
 
-$taskName = 'Romva Resume Agent'
-$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$here\run-hidden.vbs`"" -WorkingDirectory $here
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings `
-  -Description 'Makes Resumes and cover letters for romva.space with ChatGPT, in the background.' -Force | Out-Null
+# The old way (a hidden logon task) is replaced by the window starting with Windows.
+if (Get-ScheduledTask -TaskName 'Romva Resume Agent' -ErrorAction SilentlyContinue) {
+  Unregister-ScheduledTask -TaskName 'Romva Resume Agent' -Confirm:$false
+  Write-Host 'Removed the old logon task.'
+}
+Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'RomvaResumeAgent' -Value "`"$exe`" --tray"
 
-Start-ScheduledTask -TaskName $taskName
+Start-Process $exe
 Write-Host ''
-Write-Host "Installed. The agent runs now and starts by itself at every sign-in." -ForegroundColor Green
-Write-Host "Log: $env:APPDATA\RomvaResumeAgent\agent.log"
+Write-Host 'Installed. The Romva Resume Agent window is open (and starts with Windows, in the tray).' -ForegroundColor Green
+Write-Host 'In it: click "Change token..." and paste your Romva token. Sign in to ChatGPT in the Chrome window it opens.'
 Write-Host "Stop and remove: powershell -ExecutionPolicy Bypass -File .\uninstall.ps1"

@@ -1,8 +1,15 @@
-# Romva Resume Agent - stop it and remove the logon task.
-# Keeps the settings, the sign-in and the ChatGPT Chrome profile; pass -Purge to delete them too.
+# Romva Resume Agent - stop it, close its window, and stop it starting with Windows.
+# Keeps the settings, the token and the ChatGPT Chrome profile; pass -Purge to delete them too.
 
 param([switch]$Purge)
 
+# The window (gui\RomvaAgent.exe) and its start-with-Windows entry.
+Get-Process RomvaAgent -ErrorAction SilentlyContinue | Stop-Process -Force
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'RomvaResumeAgent' -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force 'HKCU:\Software\RomvaResumeAgent' -ErrorAction SilentlyContinue
+Write-Host 'Window closed; it no longer starts with Windows.'
+
+# An old install's logon task.
 $taskName = 'Romva Resume Agent'
 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
   Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -19,5 +26,5 @@ Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
 if ($Purge) {
   Remove-Item -Recurse -Force "$env:APPDATA\RomvaResumeAgent" -ErrorAction SilentlyContinue
   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\RomvaResumeAgent" -ErrorAction SilentlyContinue
-  Write-Host 'Settings, sign-in and the ChatGPT profile deleted.'
+  Write-Host 'Settings, token and the ChatGPT profile deleted.'
 }

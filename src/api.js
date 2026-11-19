@@ -5,7 +5,7 @@ import { TOKEN_HELP } from './config.js';
  *
  * The token is made by the Super Admin on romva.space → Tokens, for one
  * Profile: the agent makes that Profile's Resumes and cover letters only. No
- * email, password or sign-in; it never expires, and works until revoked.
+ * email, password or sign-in; it works until its end date or until revoked.
  */
 
 /** `status` 0: romva.space could not be reached at all (network down, timed out). */

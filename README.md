@@ -2,7 +2,8 @@
 
 Makes the Resume and cover letter for every new **Draft** application on
 romva.space, in the background, with **your own signed-in ChatGPT** — no API
-key. Starts by itself when you sign in to Windows.
+key. A small window (`gui\RomvaAgent.exe`, ~35 KB) runs it, shows its log, and
+holds the token; it starts with Windows, in the tray.
 
 For each application it:
 
@@ -37,9 +38,26 @@ cd resume_agent
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Setup asks for the romva.space address and the **Romva token**, the save
-folder, and this computer's name; then a Chrome window opens on chatgpt.com —
-sign in there once.
+The **Romva Resume Agent** window opens. Click **Change token…** and paste the
+**Romva token**. When the agent first needs ChatGPT, a Chrome window opens on
+chatgpt.com — sign in there once.
+
+(`npm run setup` still works from a terminal, to change the save folder or this
+computer's name.)
+
+## The window
+
+- **● Running / Stopped**, with **Start** and **Stop**. If the agent stops by
+  itself it is started again (after 5 s, 10 s, 30 s, then every minute) — not
+  when the token is missing or refused: then it waits for a new one.
+- **Token:** whether one is saved, its Profile and end date. The token itself
+  is never shown; **Change token…** replaces it (checked with romva.space
+  first, so a wrong one is never saved).
+- **Full log** and **Error log** (warnings and errors only), live, in local
+  time. **Copy** and **Save .txt** take the tab that is open.
+- The **X** hides the window to the tray; right-click the tray icon → **Exit**
+  closes it and stops the agent. **Start with Windows** is a tick box.
+- Rebuild after changing `gui\RomvaAgent.cs`: `npm run gui`.
 
 ### The Romva token — no sign-in
 
@@ -50,18 +68,18 @@ makes that Profile's Resumes and cover letters, and sees nothing else.
 
 The token is kept in `%APPDATA%\RomvaResumeAgent\config.json` (`"token"`), or
 taken from the `ROMVA_TOKEN` environment variable. It expires on the date the
-Super Admin chose (the agent warns in its log during the last week); when it
-has expired or been revoked, the agent logs "The Romva token was refused" —
-run `npm run setup` again with a new one. (An old `credentials.txt` is no longer
+Super Admin chose (the window shows it, and the agent warns in its log during
+the last week); when it has expired or been revoked, the agent stops with "The
+Romva token was refused" — click **Change token…** and paste a new one. (An old `credentials.txt` is no longer
 read and can be deleted.)
 
 ## Use
 
 - **Start resume / Stop** on the romva.space Applications page turns Resume
   making on or off for every worker, this agent included.
-- Log: `%APPDATA%\RomvaResumeAgent\agent.log`
+- Log: in the window, or `%APPDATA%\RomvaResumeAgent\agent.log`
 - Settings: `%APPDATA%\RomvaResumeAgent\config.json` (or run `npm run setup` again)
-- Run in a window instead (to watch it): `npm start` — one application only: `npm run once`
+- Without the window (in a terminal): `npm start` — one application only: `npm run once`
 - Leave the agent's Chrome window open (minimised is fine). If ChatGPT signs
   out, the agent waits and carries on once you sign in again.
 
@@ -75,7 +93,7 @@ a sign-in) is done by the **Romva Apply** Chrome extension in the
 ## Uninstall
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\uninstall.ps1          # keeps settings
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1          # keeps settings and the token
 powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Purge   # deletes them too
 ```
 

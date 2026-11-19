@@ -5,3 +5,6 @@ node_modules
 
 # The romva.space email and password: never committed.
 credentials.txt
+
+# The window (RomvaAgent.exe and its source): not in git.
+gui/
