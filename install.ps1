@@ -1,7 +1,7 @@
 # Romva Resume Agent - install for the current Windows user.
 #
 #   1. installs the agent's one dependency (puppeteer-core)
-#   2. runs setup: romva.space sign-in, save folder, ChatGPT sign-in
+#   2. runs setup: the Romva token, save folder, ChatGPT sign-in
 #   3. registers a logon task, so the agent starts by itself (hidden) at every sign-in
 #   4. starts it now
 #

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
-import { CREDENTIALS_FILE, DATA_DIR, loadConfig, loadCredentials, loadSession } from './config.js';
+import { DATA_DIR, TOKEN_HELP, loadConfig } from './config.js';
 import { log } from './log.js';
 
 /**
@@ -33,6 +33,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** How often the agent checks in while busy: well inside romva.space's 2-minute "online" and 15-minute hold. */
 const HEARTBEAT_MS = 60_000;
+/** The longest wait between asks when there is nothing to make (romva.space shows the agent online within 4 minutes). */
+const MAX_IDLE_WAIT_MS = 3 * 60_000;
+/** How often to ask while romva.space is at Stop. */
+const STOPPED_WAIT_MS = 2 * 60_000;
 
 /**
  * Whether `pid` is a running Node process. A lock left by an agent that was
@@ -159,6 +163,29 @@ async function makeLetter(api, chatgpt, config, job, message) {
   throw new Error(`Cover letter: ${lastError?.message ?? 'failed'}`);
 }
 
+/**
+ * ChatGPT's Resume answer, looked over by romva.space before it is handed in:
+ * readable JSON that fills the template's summary, skills, job titles and
+ * bullet points? When something is missing, ChatGPT is asked once more in a
+ * new chat, told exactly what was missing — rather than a Resume with empty
+ * sections being made. The second answer is handed in as it is (romva.space
+ * refuses it if it is still incomplete, and the application is tried later).
+ */
+async function askForResume(api, chatgpt, job) {
+  const answer = await chatgpt.ask(job.resumeMessage);
+  let check;
+  try {
+    check = await api.checkResume(job.bidId, answer);
+  } catch (error) {
+    // An older romva.space without the check: hand the answer in as before.
+    if (error instanceof ApiError && error.status === 404) return answer;
+    throw error;
+  }
+  if (check.ok || !check.retryMessage) return answer;
+  log.warn('Resume answer incomplete; asking ChatGPT again', { company: job.company, problems: check.problems });
+  return chatgpt.ask(check.retryMessage);
+}
+
 async function makeOne(api, chatgpt, config, job) {
   const stopHolding = keepHolding(api, job);
   try {
@@ -168,7 +195,7 @@ async function makeOne(api, chatgpt, config, job) {
       return;
     }
     log.info(`Making #${job.number ?? '?'} ${job.company} — ${job.role}`);
-    const resumeAnswer = await chatgpt.ask(job.resumeMessage);
+    const resumeAnswer = await askForResume(api, chatgpt, job);
     const resume = await api.submitResume(job.bidId, resumeAnswer);
     await saveQuietly(config.saveDir, job, resume.files, 'Resume');
     await makeLetter(api, chatgpt, config, job, resume.coverLetterMessage);
@@ -179,8 +206,8 @@ async function makeOne(api, chatgpt, config, job) {
 
 async function main() {
   const config = loadConfig();
-  if (!loadSession() && !loadCredentials()) {
-    log.error(`Not signed in to romva.space. Put the email and password in ${CREDENTIALS_FILE}, or run setup: npm run setup`);
+  if (!config.token) {
+    log.error(`No Romva token. ${TOKEN_HELP}`);
     process.exit(1);
   }
   if (!singleInstance()) {
@@ -188,18 +215,24 @@ async function main() {
     process.exit(0);
   }
 
-  const api = createApi(config.apiUrl, config.workerName);
+  const api = createApi(config.apiUrl, config.workerName, config.token);
   const chatgpt = createChatGpt(config.chrome);
   const me = await api.me().catch((error) => {
-    log.error('Could not sign in to romva.space', { error: error.message });
+    log.error('romva.space did not take the Romva token', { error: error.message });
     process.exit(1);
   });
   log.info(`Romva Resume Agent started`, {
-    user: me?.user?.email ?? me?.email,
+    profile: me?.token?.profile?.name,
+    tokenExpires: me?.token?.expiresAt?.slice(0, 10) ?? 'never',
     worker: config.workerName,
     saveDir: config.saveDir,
     api: config.apiUrl,
   });
+
+  const tokenDaysLeft = me?.token?.expiresAt ? Math.ceil((Date.parse(me.token.expiresAt) - Date.now()) / 86_400_000) : null;
+  if (tokenDaysLeft !== null && tokenDaysLeft <= 7) {
+    log.warn(`The Romva token expires in ${tokenDaysLeft} day(s). ${TOKEN_HELP}`);
+  }
 
   // Whatever this computer's previous run was making when it stopped is free
   // again at once, rather than after romva.space's 15-minute hold runs out.
@@ -219,6 +252,8 @@ async function main() {
   let pauses = 0;
   let resumedAt = 0;
   let resumeAfter = 0;
+  // How long to wait before asking again when there was nothing to make.
+  let idleWaitMs = config.pollSeconds * 1000;
 
   while (true) {
     try {
@@ -242,15 +277,22 @@ async function main() {
       if (!enabled) {
         if (!stoppedLogged) log.info('Auto resume is at Stop on romva.space; waiting for Start');
         stoppedLogged = true;
-        await sleep(config.pollSeconds * 1000);
+        idleWaitMs = config.pollSeconds * 1000;
+        // At Stop nothing will be handed out: ask again only every 2 minutes.
+        await sleep(Math.max(config.pollSeconds * 1000, STOPPED_WAIT_MS));
         continue;
       }
       stoppedLogged = false;
       if (!job) {
         if (once) return;
-        await sleep(config.pollSeconds * 1000);
+        // Nothing to make: wait a little longer each time (20 s, 40 s, 80 s … 3 min),
+        // so an idle agent asks about 20 times an hour instead of 180.
+        await sleep(idleWaitMs);
+        idleWaitMs = Math.min(idleWaitMs * 2, MAX_IDLE_WAIT_MS);
         continue;
       }
+      // Work found: back to asking quickly.
+      idleWaitMs = config.pollSeconds * 1000;
 
       try {
         await makeOne(api, chatgpt, config, job);
@@ -282,10 +324,10 @@ async function main() {
       }
       if (once) return;
     } catch (error) {
-      // romva.space unreachable, signed out of it, the network down: wait and try again.
-      // A 401 here already says what to do (credentials.txt, or setup).
+      // romva.space unreachable, the token revoked, the network down: wait and try again.
+      // A 401 here already says what to do (a new token, and setup).
       log.error(
-        error instanceof ApiError && error.status === 401 ? 'Not signed in to romva.space' : 'Could not reach romva.space',
+        error instanceof ApiError && error.status === 401 ? 'The Romva token was refused' : 'Could not reach romva.space',
         { error: error.message },
       );
       await sleep(Math.max(60, config.pollSeconds) * 1000);
