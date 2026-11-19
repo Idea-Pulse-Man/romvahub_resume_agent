@@ -5,9 +5,8 @@ import { createChatGpt } from './chatgpt.js';
 import { CONFIG_FILE, loadConfig, saveConfig } from './config.js';
 
 /**
- * One-time setup: romva.space sign-in, the save folder, and ChatGPT.
- * Run again any time to change them. The password is sent to romva.space once
- * and never written to disk.
+ * One-time setup: the Romva token (from the Super Admin, romva.space → Tokens),
+ * the save folder, and ChatGPT. Run again any time to change them.
  */
 
 async function askHidden(question) {
@@ -43,14 +42,16 @@ async function main() {
 
   console.log('Romva Resume Agent — setup\n');
   config.apiUrl = await ask('romva.space address', config.apiUrl);
-  const email = await ask('romva.space email', '');
   rl.pause();
-  const password = await askHidden('romva.space password: ');
+  const typed = (await askHidden(`Romva token (rmv_...)${config.token ? ' [Enter: keep the current one]' : ''}: `)).trim();
   rl.resume();
+  const token = typed || config.token;
+  if (!token) throw new Error("No token given. Ask the Super Admin for your Profile's token (romva.space → Tokens).");
 
-  const api = createApi(config.apiUrl);
-  const user = await api.login(email, password);
-  console.log(`Signed in as ${user?.email ?? email}.`);
+  const api = createApi(config.apiUrl, undefined, token);
+  const me = await api.me();
+  config.token = token;
+  console.log(`The token works: this agent makes ${me?.token?.profile?.name ?? 'its Profile'}'s Resumes.`);
 
   config.saveDir = await ask('Save the files under', config.saveDir);
   config.workerName = await ask('Name of this computer (shown on romva.space)', config.workerName);

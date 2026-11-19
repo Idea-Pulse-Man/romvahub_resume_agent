@@ -27,7 +27,7 @@ work carries on.
 ## Needs
 
 - Windows 10/11, **Node.js 20+** (https://nodejs.org), **Google Chrome** (or Edge)
-- a romva.space account that can see the applications (an admin sees all)
+- a Romva token for the Profile (from the Super Admin, romva.space → Tokens)
 - a ChatGPT account (sign in once in the agent's Chrome window)
 
 ## Install
@@ -37,25 +37,22 @@ cd resume_agent
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Setup asks for the romva.space address, email and password (the password is
-used once and not stored), the save folder, and this computer's name; then a
-Chrome window opens on chatgpt.com — sign in there once.
+Setup asks for the romva.space address and the **Romva token**, the save
+folder, and this computer's name; then a Chrome window opens on chatgpt.com —
+sign in there once.
 
-### Signing in again by itself — `credentials.txt`
+### The Romva token — no sign-in
 
-romva.space can end the agent's sign-in (for example when the same account
-is signed out elsewhere). To have the agent sign in again on its own, copy
-`credentials.example.txt` to `credentials.txt` in this folder and fill it in:
+The agent does not sign in to romva.space with an email and password. It uses
+a token for one Profile, made by the Super Admin on romva.space → **Tokens**
+(pick the Profile, Generate token, copy it — it is shown once). The agent then
+makes that Profile's Resumes and cover letters, and sees nothing else.
 
-```
-email=you@example.com
-password=your password
-```
-
-It is read only when the sign-in has ended, and read afresh each time, so it
-can be edited while the agent runs. A refused email or password is tried
-again after 5 minutes. `credentials.txt` holds the password in plain text:
-it is kept out of git (`.gitignore`), so keep it on this computer only.
+The token is kept in `%APPDATA%\RomvaResumeAgent\config.json` (`"token"`), or
+taken from the `ROMVA_TOKEN` environment variable. It never expires; when the
+Super Admin revokes it, the agent logs "The Romva token was refused" — run
+`npm run setup` again with a new one. (An old `credentials.txt` is no longer
+read and can be deleted.)
 
 ## Use
 
