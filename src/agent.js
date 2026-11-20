@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
-import { DATA_DIR, TOKEN_HELP, loadConfig } from './config.js';
+import { DATA_DIR, TOKEN_HELP, loadConfig, readSavedConfig } from './config.js';
 import { log } from './log.js';
 
 /**
@@ -103,7 +103,9 @@ async function saveFiles(saveDir, job, files) {
  * problem (a folder path too long, the disk full) is logged and the work
  * carries on — it never costs the application its cover letter.
  */
-async function saveQuietly(saveDir, job, files, what) {
+async function saveQuietly(config, job, files, what) {
+  // As config.json has it now: a new save folder picked in the window counts from the next files on.
+  const saveDir = readSavedConfig()?.saveDir || config.saveDir;
   try {
     const directory = await saveFiles(saveDir, job, files);
     log.info(`${what} saved`, { company: job.company, directory });
@@ -155,7 +157,7 @@ async function makeLetter(api, chatgpt, config, job, message) {
       log.warn(`Cover letter attempt ${attempt} failed`, { company: job.company, error: error.message });
       continue;
     }
-    await saveQuietly(config.saveDir, job, letter.files, 'Cover letter');
+    await saveQuietly(config, job, letter.files, 'Cover letter');
     log.info('Done', { company: job.company });
     return;
   }
@@ -197,7 +199,7 @@ async function makeOne(api, chatgpt, config, job) {
     log.info(`Making #${job.number ?? '?'} ${job.company} — ${job.role}`);
     const resumeAnswer = await askForResume(api, chatgpt, job);
     const resume = await api.submitResume(job.bidId, resumeAnswer);
-    await saveQuietly(config.saveDir, job, resume.files, 'Resume');
+    await saveQuietly(config, job, resume.files, 'Resume');
     await makeLetter(api, chatgpt, config, job, resume.coverLetterMessage);
   } finally {
     stopHolding();

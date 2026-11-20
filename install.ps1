@@ -3,7 +3,7 @@
 #   1. installs the agent's one dependency (puppeteer-core)
 #   2. builds the window (gui\RomvaAgent.exe, ~35 KB, with the C# compiler that comes with Windows)
 #   3. makes the window start with Windows (in the tray); it runs the agent and restarts it if it stops
-#   4. opens the window: click "Change token..." and paste the Romva token
+#   4. opens the window (stopped): "Change token..." (paste the Romva token), "Save folder...", then "Start"
 #
 # Run from this folder:  powershell -ExecutionPolicy Bypass -File .\install.ps1
 
@@ -43,5 +43,6 @@ Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Na
 Start-Process $exe
 Write-Host ''
 Write-Host 'Installed. The Romva Resume Agent window is open (and starts with Windows, in the tray).' -ForegroundColor Green
-Write-Host 'In it: click "Change token..." and paste your Romva token. Sign in to ChatGPT in the Chrome window it opens.'
+Write-Host 'In it: "Change token..." (paste your Romva token), "Save folder..." (where the Resumes go), then "Start".'
+Write-Host 'Sign in to ChatGPT in the Chrome window it opens.'
 Write-Host "Stop and remove: powershell -ExecutionPolicy Bypass -File .\uninstall.ps1"

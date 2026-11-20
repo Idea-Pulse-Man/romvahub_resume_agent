@@ -19,8 +19,31 @@ import { log } from './log.js';
  * check first if this stops working.
  */
 
-/** ChatGPT itself cannot be used right now (signed out, window closed…): not the application's fault. */
-export class ChatGptUnavailable extends Error {}
+/**
+ * ChatGPT itself cannot be used right now (signed out, window closed, no
+ * connection…): not the application's fault. `keepTab`: leave the tab open for
+ * the person (to sign in there) — not when it only shows a connection error.
+ */
+export class ChatGptUnavailable extends Error {
+  constructor(message, { keepTab = true } = {}) {
+    super(message);
+    this.keepTab = keepTab;
+  }
+}
+
+/** A Chrome network error for chatgpt.com itself, in words: what to check. */
+function connectionProblem(error) {
+  const code = /net::ERR_[A-Z0-9_]+/.exec(error?.message ?? '')?.[0];
+  if (!code) return null;
+  const proxy = /INVALID_AUTH_CREDENTIALS|PROXY|TUNNEL|SOCKS/.test(code);
+  return new ChatGptUnavailable(
+    proxy
+      ? `Could not open chatgpt.com (${code}): a proxy in the agent's Chrome refused the connection. ` +
+          "Check the proxy extension there (e.g. SmartProxy) and its password, or turn it off for chatgpt.com."
+      : `Could not open chatgpt.com (${code}). Check this computer's internet connection.`,
+    { keepTab: false },
+  );
+}
 
 const SELECTORS = {
   composer: '#prompt-textarea, textarea[name="prompt"], #mobile-composer-prompt, [contenteditable="true"][role="textbox"]',
@@ -41,6 +64,29 @@ const BROWSER_CANDIDATES = [
 ];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** `promise`, or `onTimeout()`'s value after `ms` — whichever comes first. The timer never outlives it. */
+function within(promise, ms, onTimeout) {
+  let timer;
+  const late = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      try {
+        resolve(onTimeout());
+      } catch (error) {
+        reject(error);
+      }
+    }, ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+/** A step that may hang (closing a tab, listing tabs): an error after `ms` instead. */
+function bounded(promise, ms, what) {
+  promise.catch(() => undefined); // given up on: never an unhandled rejection later
+  return within(promise, ms, () => {
+    throw new Error(`${what} took longer than ${Math.round(ms / 1000)} s`);
+  });
+}
 
 // In-page code as source text, so nothing is rewritten by a bundler on the way in.
 const IN_PAGE = {
@@ -74,7 +120,11 @@ const IN_PAGE = {
    */
   session: `(async () => {
     try {
-      const response = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
+      const response = await fetch('/api/auth/session', {
+        credentials: 'include',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15000),
+      });
       if (!response.ok) return 'unknown';
       const session = await response.json();
       if (!session || typeof session !== 'object') return 'unknown';
@@ -187,12 +237,59 @@ export function createChatGpt(settings) {
     return connection;
   }
 
+  let warnedNoAnswer = false;
+
+  /**
+   * Opens `url` in `page`. page.goto has a timeout, but once the page has
+   * loaded it may still wait — with no timeout at all — for Chrome to report
+   * the page's response. That report never comes when a proxy asks for a
+   * password on the way (an extension such as SmartProxy), and the agent sat
+   * at "Making…" for good. So the page's own DOMContentLoaded also counts as
+   * loaded, and goto is not waited for past its timeout; whether ChatGPT is
+   * really there is checked right after (its message box).
+   */
+  async function load(page, url) {
+    const origin = new URL(url).origin;
+    let failure;
+    for (const timeout of [60_000, 90_000]) {
+      let onLoaded;
+      const loaded = new Promise((resolve) => {
+        onLoaded = () => {
+          if (page.url().startsWith(origin)) resolve('loaded');
+        };
+        page.on('domcontentloaded', onLoaded);
+      });
+      const going = page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+      going.catch(() => undefined); // may still be pending when given up on
+      const outcome = await within(
+        Promise.race([going.then(() => 'loaded', (error) => error), loaded]),
+        timeout + 15_000,
+        () => 'no answer',
+      );
+      page.off('domcontentloaded', onLoaded);
+      if (outcome === 'loaded') return;
+      if (outcome === 'no answer') {
+        if (!warnedNoAnswer) {
+          warnedNoAnswer = true;
+          log.warn('Chrome did not say whether chatgpt.com loaded (a proxy in the way?); carrying on', { url });
+        }
+        return;
+      }
+      failure = outcome;
+    }
+    if (failure?.name === 'TimeoutError') {
+      throw new ChatGptUnavailable("chatgpt.com did not load (twice). Look at the agent's Chrome window.");
+    }
+    throw connectionProblem(failure) ?? failure;
+  }
+
   async function closeChat(page) {
     try {
       if (page.isClosed()) return;
-      const others = (await (await browser()).pages()).filter((other) => other !== page);
-      if (others.length > 0) await page.close();
-      else await page.goto(settings.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      const pages = await bounded((await browser()).pages(), 30_000, 'Listing the Chrome tabs');
+      const others = pages.filter((other) => other !== page);
+      if (others.length > 0) await bounded(page.close(), 30_000, 'Closing the tab');
+      else await load(page, settings.url);
     } catch (error) {
       log.warn('Could not close the finished ChatGPT tab', { error: error.message });
     }
@@ -257,11 +354,7 @@ export function createChatGpt(settings) {
     // application form they are filling in.
     const url = new URL(settings.url);
     if (settings.temporaryChat) url.searchParams.set('temporary-chat', 'true');
-    try {
-      await page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    } catch {
-      await page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: 90_000 });
-    }
+    await load(page, url.toString());
     try {
       await page.waitForSelector(SELECTORS.composer, { visible: true, timeout: 30_000 });
     } catch {
@@ -271,7 +364,7 @@ export function createChatGpt(settings) {
       throw new ChatGptUnavailable('ChatGPT is not signed in. Sign in on chatgpt.com in the agent\'s Chrome window.');
     }
     if (!(await waitFresh(page))) {
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
+      await load(page, url.toString());
       await page.waitForSelector(SELECTORS.composer, { visible: true, timeout: 30_000 }).catch(() => undefined);
       if (!(await waitFresh(page))) throw new ChatGptUnavailable('ChatGPT did not open a new, empty chat.');
     }
@@ -326,7 +419,9 @@ export function createChatGpt(settings) {
    */
   let signInTab = null;
   async function keepForSignIn(page) {
-    if (signInTab && signInTab !== page && !signInTab.isClosed()) await signInTab.close().catch(() => undefined);
+    if (signInTab && signInTab !== page && !signInTab.isClosed()) {
+      await bounded(signInTab.close(), 30_000, 'Closing the tab').catch(() => undefined);
+    }
     signInTab = page;
   }
 
@@ -342,16 +437,30 @@ export function createChatGpt(settings) {
     async askNow(message) {
       let page;
       try {
-        page = await (await browser()).newPage();
+        const opening = (await browser()).newPage();
+        page = await bounded(opening, 60_000, 'Opening a new tab').catch((error) => {
+          opening.then((late) => late.close()).catch(() => undefined); // if it opens after all
+          throw error;
+        });
       } catch (error) {
         if (error instanceof ChatGptUnavailable) throw error;
         throw new ChatGptUnavailable(`Could not open ChatGPT: ${error.message}`);
       }
+      // Last resort: whatever step stops answering, the chat gives up in the end
+      // (the tab is closed) — the application is never held at "Making…" for good.
+      const limitMinutes = settings.answerTimeoutMinutes + 10;
       let keepOpen = false;
       try {
-        return await askIn(page, message);
+        const asking = askIn(page, message);
+        asking.catch(() => undefined); // still running when given up on
+        return await within(asking, limitMinutes * 60_000, () => {
+          throw new ChatGptUnavailable(
+            `ChatGPT got stuck: no answer after ${limitMinutes} minutes. Look at the agent's Chrome window.`,
+            { keepTab: false },
+          );
+        });
       } catch (error) {
-        keepOpen = error instanceof ChatGptUnavailable;
+        keepOpen = error instanceof ChatGptUnavailable && error.keepTab;
         const text = `${error?.name ?? ''} ${error?.message ?? error}`;
         if (/TargetCloseError|Target closed|Session closed|detached|Connection closed/i.test(text)) {
           throw new ChatGptUnavailable('The ChatGPT window was closed while it was writing.');
@@ -372,7 +481,7 @@ export function createChatGpt(settings) {
      */
     async ready() {
       try {
-        const pages = await (await browser()).pages();
+        const pages = await bounded((await browser()).pages(), 30_000, 'Listing the Chrome tabs');
         const isChat = (page) => /chatgpt\.com|chat\.openai\.com/.test(page.url());
         const kept = signInTab && !signInTab.isClosed() ? signInTab : null;
         // The person is signing in on the kept tab (it has left chatgpt.com): wait.
@@ -380,8 +489,8 @@ export function createChatGpt(settings) {
         const chat = kept ?? pages.find(isChat);
         if (!chat) {
           if (pages.some((page) => /openai\.com|google\.com|apple\.com|live\.com/.test(page.url()))) return false;
-          const page = pages[0] ?? (await (await browser()).newPage());
-          await page.goto(settings.url, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
+          const page = pages[0] ?? (await bounded((await browser()).newPage(), 60_000, 'Opening a new tab'));
+          await load(page, settings.url).catch(() => undefined);
           return false;
         }
         if (!(await signedIn(chat))) return false;
@@ -401,7 +510,7 @@ export function createChatGpt(settings) {
       const pages = await (await browser()).pages();
       const page = pages.find((p) => /chatgpt\.com/.test(p.url())) ?? pages[0] ?? (await (await browser()).newPage());
       await page.bringToFront();
-      if (!/chatgpt\.com/.test(page.url())) await page.goto(settings.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      if (!/chatgpt\.com/.test(page.url())) await load(page, settings.url);
     },
 
     disconnect() {

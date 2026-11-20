@@ -72,3 +72,13 @@ export function loadConfig() {
 export function saveConfig(config) {
   writeJson(CONFIG_FILE, config);
 }
+
+/** config.json as saved (no defaults filled in, no ROMVA_TOKEN), or null. */
+export function readSavedConfig() {
+  return readJson(CONFIG_FILE);
+}
+
+/** Changes some keys of config.json and keeps the rest as it is. */
+export function updateConfig(changes) {
+  writeJson(CONFIG_FILE, { ...(readJson(CONFIG_FILE) ?? {}), ...changes });
+}

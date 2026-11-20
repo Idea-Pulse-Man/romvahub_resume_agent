@@ -38,23 +38,36 @@ cd resume_agent
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The **Romva Resume Agent** window opens. Click **Change token…** and paste the
-**Romva token**. When the agent first needs ChatGPT, a Chrome window opens on
-chatgpt.com — sign in there once.
+The **Romva Resume Agent** window opens, stopped — nothing runs until you say
+so:
 
-(`npm run setup` still works from a terminal, to change the save folder or this
-computer's name.)
+1. **Change token…** — paste the **Romva token**,
+2. **Save folder…** — pick where the Resumes are saved (default `Documents\Resume`),
+3. **Start**.
+
+When the agent first needs ChatGPT, a Chrome window opens on chatgpt.com — sign
+in there once.
+
+(`npm run setup` still works from a terminal, to change this computer's name.)
 
 ## The window
 
-- **● Running / Stopped**, with **Start** and **Stop**. If the agent stops by
-  itself it is started again (after 5 s, 10 s, 30 s, then every minute) — not
-  when the token is missing or refused: then it waits for a new one.
+- **● Running / Stopped**, with **Start** and **Stop**. Opened by hand, the
+  window never starts the agent by itself; **Start** waits until a token is
+  set. If the agent stops by itself it is started again (after 5 s, 10 s,
+  30 s, then every minute) — not when the token is missing or refused: then it
+  waits for a new one. Started with Windows (in the tray), the agent goes on as
+  it was left: running if it was running.
 - **Token:** whether one is saved, its Profile and end date. The token itself
   is never shown; **Change token…** replaces it (checked with romva.space
   first, so a wrong one is never saved).
+- **Save to:** the save folder; **Save folder…** changes it (it is made and
+  written to once first), **Open** opens it. A running agent uses a new folder
+  from its next files on — no restart.
 - **Full log** and **Error log** (warnings and errors only), live, in local
-  time. **Copy** and **Save .txt** take the tab that is open.
+  time. **Copy** and **Save .txt** take the tab that is open. **Track log**
+  on: the log scrolls down to each new line, so the newest is always in view;
+  off: it stays where you scrolled it.
 - The **X** hides the window to the tray; right-click the tray icon → **Exit**
   closes it and stops the agent. **Start with Windows** is a tick box.
 - Rebuild after changing `gui\RomvaAgent.cs`: `npm run gui`.
@@ -82,6 +95,14 @@ read and can be deleted.)
 - Without the window (in a terminal): `npm start` — one application only: `npm run once`
 - Leave the agent's Chrome window open (minimised is fine). If ChatGPT signs
   out, the agent waits and carries on once you sign in again.
+- A proxy extension in the agent's Chrome (e.g. SmartProxy) that sends
+  chatgpt.com through a proxy with a password can fail now and then
+  (`net::ERR_INVALID_AUTH_CREDENTIALS`). The agent then pauses and tries
+  again, and the application is handed back without being counted as failed.
+  Turn the proxy off for chatgpt.com if ChatGPT does not need it.
+- No chat can hold an application at "Making…" for good: a page that never
+  reports back is not waited for, and a chat gives up after
+  `answerTimeoutMinutes` + 10 minutes.
 
 ## Apply
 
@@ -102,7 +123,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Purge   # deletes them
 | Key | Default | |
 | --- | --- | --- |
 | `apiUrl` | `https://www.romva.space` | |
-| `saveDir` | `Documents\Resume` | where the folders go |
+| `saveDir` | `Documents\Resume` | where the folders go (the window's **Save folder…**) |
 | `workerName` | `agent · <computer>` | shown on romva.space |
 | `pollSeconds` | `20` | how often to look for new applications |
 | `chrome.path` | first Chrome/Edge found | |

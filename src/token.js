@@ -1,5 +1,7 @@
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { createApi } from './api.js';
-import { loadConfig, saveConfig } from './config.js';
+import { loadConfig, saveConfig, updateConfig } from './config.js';
 
 /**
  * For the GUI (gui/RomvaAgent.exe). Never prints the token itself.
@@ -7,6 +9,10 @@ import { loadConfig, saveConfig } from './config.js';
  *   node src/token.js status   → {"hasToken":true,"profile":"…","expiresAt":"…"} (or "error", and "refused" on a 401)
  *   node src/token.js set      ← the new token on stdin; checked with romva.space, then saved
  *                              → {"ok":true,"profile":"…","expiresAt":"…"} or {"ok":false,"error":"…"}
+ *   node src/token.js folder   ← nothing: → {"ok":true,"saveDir":"…"} (where the files are saved)
+ *                              ← a folder on stdin: checked (made, and written to once), then saved
+ *                              → {"ok":true,"saveDir":"…"} or {"ok":false,"error":"…"}
+ *                                (the running agent uses it from its next files on: no restart)
  */
 
 function print(value) {
@@ -49,8 +55,26 @@ async function set() {
   }
 }
 
-const command = process.argv[2];
-(command === 'set' ? set() : command === 'status' ? status() : Promise.reject(new Error('Use: status | set')))
+async function folder() {
+  const wanted = await readStdin();
+  if (!wanted) return print({ ok: true, saveDir: loadConfig().saveDir });
+  if (!path.isAbsolute(wanted)) return print({ ok: false, error: 'Pick a whole folder path, like C:\\Users\\you\\Documents\\Resume.' });
+  const saveDir = path.resolve(wanted);
+  try {
+    mkdirSync(saveDir, { recursive: true });
+    const probe = path.join(saveDir, `.romva-write-test-${process.pid}`);
+    writeFileSync(probe, '');
+    unlinkSync(probe);
+  } catch (error) {
+    return print({ ok: false, error: `Files cannot be saved there: ${error.message}` });
+  }
+  updateConfig({ saveDir });
+  print({ ok: true, saveDir });
+}
+
+const commands = { set, status, folder };
+const command = commands[process.argv[2]];
+(command ? command() : Promise.reject(new Error('Use: status | set | folder')))
   // No process.exit(): right after a fetch it can trip a Node bug on Windows. Node ends by itself.
   .catch((error) => {
     print({ ok: false, error: error.message });
