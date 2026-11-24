@@ -13,10 +13,38 @@
 /** Added to every Resume request. */
 export const FINISHED_TEXT = [
   'This JSON goes into the final Resume word for word, and the Resume is sent as it is: nobody edits it first.',
-  'So write finished text only. No placeholders or brackets (such as "[verified percentage]", "[Confirm official job title]" or "X%"),',
+  'So write finished text only. No placeholders (such as "[verified percentage]", "[Confirm official job title]" or "X%"),',
   'and no notes to the candidate (such as "(verify proficiency)", "confirm", "draft" or "before submission").',
+  'Bold markup that the prompt asks for (such as [text][highlight]) is fine.',
   'Where you would leave a placeholder for a detail you do not know, leave that detail out and write the sentence without it.',
 ].join('\n');
+
+const BOLD_END = '][highlight]';
+
+/**
+ * `text` without its bold markup — Resume Maker's `[text][highlight]` and
+ * Markdown's `**text**` — keeping the bold words, and any placeholder inside
+ * them ("[reducing errors by [verified percentage]][highlight]").
+ */
+function withoutBold(text) {
+  let out = text.replace(/\*\*([^*\n]+?)\*\*/g, '$1');
+  for (let end = out.indexOf(BOLD_END); end >= 0; end = out.indexOf(BOLD_END)) {
+    // The "[" that opens this bold span, bracket pairs inside it skipped.
+    let depth = 0;
+    let open = end - 1;
+    for (; open >= 0; open -= 1) {
+      if (out[open] === ']') depth += 1;
+      else if (out[open] === '[') {
+        if (depth === 0) break;
+        depth -= 1;
+      }
+    }
+    out = open >= 0
+      ? out.slice(0, open) + out.slice(open + 1, end) + out.slice(end + BOLD_END.length)
+      : out.slice(0, end) + out.slice(end + BOLD_END.length);
+  }
+  return out.replace(/\[\/?highlight\]/gi, '');
+}
 
 const DRAFT_MARKS = [
   // [Confirm official job title], [verified percentage]
@@ -52,7 +80,8 @@ export function draftMarks(answer) {
   const found = new Set();
   const visit = (value) => {
     if (typeof value === 'string') {
-      for (const mark of DRAFT_MARKS) for (const match of value.matchAll(mark)) found.add(match[0].trim());
+      const plain = withoutBold(value);
+      for (const mark of DRAFT_MARKS) for (const match of plain.matchAll(mark)) found.add(match[0].trim());
     } else if (Array.isArray(value)) {
       value.forEach(visit);
     } else if (value && typeof value === 'object') {

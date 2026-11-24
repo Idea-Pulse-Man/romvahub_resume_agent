@@ -165,11 +165,14 @@ const IN_PAGE = {
     const body = document.body.innerText || '';
     const at = body.lastIndexOf(${JSON.stringify(marker)});
     const tail = at >= 0 ? body.slice(at + ${marker.length}) : '';
-    const streaming = Array.from(document.querySelectorAll('button')).some((b) => {
-      const label = (b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-testid') || '');
-      return /\\bstop\\b|stop[-_ ]?(generating|streaming|response|button)/i.test(label);
-    });
-    return { pres, tail, streaming };
+    const labels = Array.from(document.querySelectorAll('button'), (b) =>
+      ((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-testid') || '')).trim());
+    const streaming = labels.some((label) => /\\bstop\\b|stop[-_ ]?(generating|streaming|response|button)/i.test(label));
+    // The buttons under a finished answer. The question has its own "Copy
+    // message", and a code block its "Copy code": neither counts.
+    const finished = labels.some((label) => /^(copy|read aloud|more actions|good response|bad response)\\b/i.test(label)
+      && !/^copy (message|code)\\b/i.test(label));
+    return { pres, tail, streaming, finished };
   })()`,
   click: `(() => {
     const button = Array.from(document.querySelectorAll(${JSON.stringify(SELECTORS.send)}))
@@ -371,6 +374,23 @@ export function createChatGpt(settings) {
     return (block ?? answer.tail).trim();
   }
 
+  /** Whether `text` holds a whole JSON object (a half-written one does not parse). */
+  function wholeJson(text) {
+    for (const candidate of [text, text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)]) {
+      try {
+        const value = JSON.parse(candidate);
+        if (value && typeof value === 'object' && !Array.isArray(value)) return true;
+      } catch {
+        // Next.
+      }
+    }
+    return false;
+  }
+
+  /** Unchanged this long, with no sign of finishing either way, an answer is taken as it is. */
+  const NO_SIGN_MS = 120_000;
+  let warnedNoSign = false;
+
   let warnedNoSearch = false;
 
   /** Whether the Web search pill is in the message box (it may show a moment after the box). */
@@ -418,36 +438,42 @@ export function createChatGpt(settings) {
     if (searching && !(await searchOn(page, 1000))) log.warn('Web search was turned off while the prompt was typed');
     await send(page);
 
+    // When is the answer finished? Not when the page has stopped changing for
+    // a few seconds: a thinking model (High) thinks and searches the web with
+    // no Stop button shown and nothing changing for long stretches, and an
+    // answer taken then was half an answer — romva.space found the Resume's
+    // summary, skills and experience all empty. Finished is chatgpt.com's own
+    // sign: the Copy / Read aloud / More actions buttons under the answer.
+    // Failing that, it was being written (Stop showed) and has stopped with
+    // its JSON whole; failing both, nothing has changed for 2 minutes.
     const deadline = Date.now() + settings.answerTimeoutMinutes * 60_000;
-    let started = false;
     let sawStreaming = false;
     let last = '';
-    let stableSince = 0;
+    let stableSince = Date.now();
     while (Date.now() < deadline) {
       await sleep(1000);
       const answer = await page.evaluate(IN_PAGE.answer(marker));
       sawStreaming ||= answer.streaming;
-      // Every question asks for JSON, so braces after the request marker mean
-      // the answer has begun — even one in plain text (no code block) while
-      // chatgpt.com's Stop button is not recognised.
-      started ||= answer.streaming || answer.pres.length > 0 || /\{[\s\S]*\}/.test(answer.tail);
-      // Without the Stop button to say it is still writing, a pause in the
-      // writing must last longer before the answer is taken as finished.
-      const settleMs = sawStreaming ? 3000 : 10_000;
-      const key = JSON.stringify([answer.pres, answer.tail]);
-      if (!started || answer.streaming) {
-        stableSince = 0;
-        last = key;
-        continue;
-      }
-      if (key !== last || !stableSince) {
+      const key = JSON.stringify([answer.pres, answer.tail, answer.finished]);
+      if (key !== last) {
         last = key;
         stableSince = Date.now();
         continue;
       }
-      if (Date.now() - stableSince >= settleMs) {
-        const text = answerText(answer);
-        if (text) return text;
+      if (answer.streaming) continue;
+      const text = answerText(answer);
+      const still = Date.now() - stableSince;
+      // Finished, JSON or not (a question back is reported by romva.space, and asked again).
+      if (answer.finished && text && still >= 2000) return text;
+      // Every question asks for JSON: no braces, no answer yet.
+      if (!/\{[\s\S]*\}/.test(text)) continue;
+      if (sawStreaming && still >= 2000 && wholeJson(text)) return text;
+      if (still >= NO_SIGN_MS) {
+        if (!warnedNoSign) {
+          warnedNoSign = true;
+          log.warn('ChatGPT showed no sign of finishing (chatgpt.com changed?); took the answer after 2 minutes unchanged');
+        }
+        return text;
       }
     }
     throw new Error(`ChatGPT had not finished answering after ${settings.answerTimeoutMinutes} minutes.`);

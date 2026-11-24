@@ -24,6 +24,12 @@ candidate to finish ("[Confirm official job title]", "by X%", "(verify
 proficiency)"). So each Resume request says the answer goes into the Resume
 word for word, and a draft answer is asked for once more with its placeholders
 quoted (the log says so; one still left after that is noted in the log).
+Every answer asked for again is kept in `%APPDATA%\RomvaResumeAgent\answers\`
+(the newest 30), to see what ChatGPT wrote.
+
+An answer is taken when chatgpt.com shows it finished (the Copy / Read aloud
+buttons under it), not when the page stops changing: a thinking model thinks
+and searches for long stretches with nothing changing on the page.
 
 Applications are taken in the order of the Applications list (No 1, 2, 3…).
 For each one the agent makes whatever is missing — the Resume and cover

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
@@ -178,6 +178,23 @@ async function makeLetter(api, chatgpt, config, job, message) {
  * A draft for the candidate to finish ("[Confirm official job title]", "by
  * X%") is asked for again the same way: see draft-text.js.
  */
+/** Where answers that were asked for again are kept, to see what ChatGPT wrote (the newest 30). */
+const ANSWERS_DIR = path.join(DATA_DIR, 'answers');
+
+function keepAnswer(job, label, text) {
+  try {
+    mkdirSync(ANSWERS_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const company = String(job.company ?? 'job').replace(/[^\w.-]+/g, '_').slice(0, 40);
+    const file = path.join(ANSWERS_DIR, `${stamp}_${company}_${label}.txt`);
+    writeFileSync(file, text);
+    for (const old of readdirSync(ANSWERS_DIR).sort().reverse().slice(30)) unlinkSync(path.join(ANSWERS_DIR, old));
+    return file;
+  } catch {
+    return undefined; // Only for looking at later.
+  }
+}
+
 async function askForResume(api, chatgpt, config, job) {
   const options = { webSearch: config.chrome.resumeWebSearch !== false };
   const answer = await chatgpt.ask(`${job.resumeMessage}\n\n${FINISHED_TEXT}`, options);
@@ -193,18 +210,22 @@ async function askForResume(api, chatgpt, config, job) {
   const drafts = draftMarks(answer);
   if (!incomplete && !drafts.length) return answer;
 
+  const kept = keepAnswer(job, 'first', answer);
   let retry = job.resumeMessage;
   if (incomplete) {
-    log.warn('Resume answer incomplete; asking ChatGPT again', { company: job.company, problems: check.problems });
+    log.warn('Resume answer incomplete; asking ChatGPT again', { company: job.company, problems: check.problems, answer: kept });
     retry = check.retryMessage;
   }
   if (drafts.length) {
-    log.warn('Resume answer is a draft (placeholders); asking ChatGPT again', { company: job.company, drafts });
+    log.warn('Resume answer is a draft (placeholders); asking ChatGPT again', { company: job.company, drafts, answer: kept });
     retry = withDraftsPointedOut(retry, drafts);
   }
   const second = await chatgpt.ask(`${retry}\n\n${FINISHED_TEXT}`, options);
+  const keptSecond = keepAnswer(job, 'second', second);
   const left = draftMarks(second);
-  if (left.length) log.warn('Resume answer still has placeholders; handed in as it is', { company: job.company, drafts: left });
+  if (left.length) {
+    log.warn('Resume answer still has placeholders; handed in as it is', { company: job.company, drafts: left, answer: keptSecond });
+  }
   return second;
 }
 
