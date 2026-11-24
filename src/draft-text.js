@@ -8,15 +8,21 @@
  *
  * Every Resume chat says the answer is the finished text, and an answer that
  * is a draft all the same is asked for once more, with its drafts quoted.
+ *
+ * It must not read as "leave out what you do not know", nor as "nobody checks
+ * this": told so (2026-11-24), ChatGPT left every job title, skill group and
+ * bullet point empty in 3 first answers out of 4 ("unsupported employment
+ * claims … have been omitted"), and each had to be asked for again.
  */
 
 /** Added to every Resume request. */
 export const FINISHED_TEXT = [
-  'This JSON goes into the final Resume word for word, and the Resume is sent as it is: nobody edits it first.',
-  'So write finished text only. No placeholders (such as "[verified percentage]", "[Confirm official job title]" or "X%"),',
+  'This JSON goes into the final Resume word for word.',
+  'Fill in every field the prompt asks for, written as the prompt says: the summary, every skill group, every job title and every bullet point. Leave none of them empty.',
+  'Write finished text only: no placeholders (such as "[verified percentage]", "[Confirm official job title]" or "X%"),',
   'and no notes to the candidate (such as "(verify proficiency)", "confirm", "draft" or "before submission").',
   'Bold markup that the prompt asks for (such as [text][highlight]) is fine.',
-  'Where you would leave a placeholder for a detail you do not know, leave that detail out and write the sentence without it.',
+  'Where one figure or name in a sentence is unknown, write that sentence without it instead of leaving a placeholder.',
 ].join('\n');
 
 const BOLD_END = '][highlight]';
