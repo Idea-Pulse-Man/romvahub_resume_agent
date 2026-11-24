@@ -172,9 +172,11 @@ async function makeLetter(api, chatgpt, config, job, message) {
  * new chat, told exactly what was missing — rather than a Resume with empty
  * sections being made. The second answer is handed in as it is (romva.space
  * refuses it if it is still incomplete, and the application is tried later).
+ * Both chats start with ChatGPT's Web search on (chrome.resumeWebSearch).
  */
-async function askForResume(api, chatgpt, job) {
-  const answer = await chatgpt.ask(job.resumeMessage);
+async function askForResume(api, chatgpt, config, job) {
+  const options = { webSearch: config.chrome.resumeWebSearch !== false };
+  const answer = await chatgpt.ask(job.resumeMessage, options);
   let check;
   try {
     check = await api.checkResume(job.bidId, answer);
@@ -185,7 +187,7 @@ async function askForResume(api, chatgpt, job) {
   }
   if (check.ok || !check.retryMessage) return answer;
   log.warn('Resume answer incomplete; asking ChatGPT again', { company: job.company, problems: check.problems });
-  return chatgpt.ask(check.retryMessage);
+  return chatgpt.ask(check.retryMessage, options);
 }
 
 async function makeOne(api, chatgpt, config, job) {
@@ -197,7 +199,7 @@ async function makeOne(api, chatgpt, config, job) {
       return;
     }
     log.info(`Making #${job.number ?? '?'} ${job.company} — ${job.role}`);
-    const resumeAnswer = await askForResume(api, chatgpt, job);
+    const resumeAnswer = await askForResume(api, chatgpt, config, job);
     const resume = await api.submitResume(job.bidId, resumeAnswer);
     await saveQuietly(config, job, resume.files, 'Resume');
     await makeLetter(api, chatgpt, config, job, resume.coverLetterMessage);

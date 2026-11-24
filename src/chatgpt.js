@@ -47,6 +47,12 @@ function connectionProblem(error) {
 
 const SELECTORS = {
   composer: '#prompt-textarea, textarea[name="prompt"], #mobile-composer-prompt, [contenteditable="true"][role="textbox"]',
+  /**
+   * A tool chosen for the chat before it is sent: chatgpt.com puts it at the
+   * start of the message box as a pill ("Web search", from ?hints=search).
+   */
+  toolPill: '[data-system-hint-type]',
+  searchPill: '[data-system-hint-type="search"]',
   send: [
     'button[data-testid="send-button"]',
     '#composer-submit-button',
@@ -96,8 +102,25 @@ const IN_PAGE = {
     const text = ${JSON.stringify(text)};
     const isField = editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT';
     editor.focus();
-    if (isField) { editor.select(); } else { document.execCommand('selectAll'); }
-    document.execCommand('delete');
+    // A tool pill (Web search) stays: only what follows it is replaced.
+    const pill = isField ? null : editor.querySelector(${JSON.stringify(SELECTORS.toolPill)});
+    if (isField) {
+      editor.select();
+      document.execCommand('delete');
+    } else if (pill) {
+      const after = document.createRange();
+      after.setStartAfter(pill);
+      after.setEnd(editor, editor.childNodes.length);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(after);
+      // Nothing typed yet: no delete, which would take the pill with it.
+      if (after.toString().trim()) document.execCommand('delete');
+      else selection.collapseToEnd();
+    } else {
+      document.execCommand('selectAll');
+      document.execCommand('delete');
+    }
     if (${JSON.stringify(how)} === 'insert') {
       document.execCommand('insertText', false, text);
     } else if (isField) {
@@ -348,12 +371,26 @@ export function createChatGpt(settings) {
     return (block ?? answer.tail).trim();
   }
 
-  async function askIn(page, message) {
+  let warnedNoSearch = false;
+
+  /** Whether the Web search pill is in the message box (it may show a moment after the box). */
+  async function searchOn(page, waitMs) {
+    const deadline = Date.now() + waitMs;
+    while (true) {
+      const on = await page.evaluate(`!!document.querySelector(${JSON.stringify(SELECTORS.searchPill)})`);
+      if (on || Date.now() >= deadline) return on;
+      await sleep(500);
+    }
+  }
+
+  async function askIn(page, message, { webSearch = false } = {}) {
     // Not brought to the front: a new tab is already the active one in its
     // window, and focusing the window would pull the person away from an
     // application form they are filling in.
     const url = new URL(settings.url);
     if (settings.temporaryChat) url.searchParams.set('temporary-chat', 'true');
+    // chatgpt.com's own link for a new chat with Web search already chosen.
+    if (webSearch) url.searchParams.set('hints', 'search');
     await load(page, url.toString());
     try {
       await page.waitForSelector(SELECTORS.composer, { visible: true, timeout: 30_000 });
@@ -369,8 +406,16 @@ export function createChatGpt(settings) {
       if (!(await waitFresh(page))) throw new ChatGptUnavailable('ChatGPT did not open a new, empty chat.');
     }
 
+    // No Web search (chatgpt.com changed, or the account has none): ask without it.
+    const searching = webSearch && (await searchOn(page, 5000));
+    if (webSearch && !searching && !warnedNoSearch) {
+      warnedNoSearch = true;
+      log.warn('ChatGPT did not turn on Web search; asking without it');
+    }
+
     const marker = `Request ${randomUUID()}`;
     await fill(page, [message, '', marker].join('\n'));
+    if (searching && !(await searchOn(page, 1000))) log.warn('Web search was turned off while the prompt was typed');
     await send(page);
 
     const deadline = Date.now() + settings.answerTimeoutMinutes * 60_000;
@@ -426,15 +471,18 @@ export function createChatGpt(settings) {
   }
 
   const self = {
-    /** One message in a new chat, in its own tab; returns the answer. Chats wait their turn. */
-    ask(message) {
+    /**
+     * One message in a new chat, in its own tab; returns the answer. Chats wait their turn.
+     * `webSearch`: the chat starts with ChatGPT's Web search turned on.
+     */
+    ask(message, options = {}) {
       return new Promise((resolve, reject) => {
-        queue.push({ message, resolve, reject });
+        queue.push({ message, options, resolve, reject });
         pump();
       });
     },
 
-    async askNow(message) {
+    async askNow(message, options = {}) {
       let page;
       try {
         const opening = (await browser()).newPage();
@@ -451,7 +499,7 @@ export function createChatGpt(settings) {
       const limitMinutes = settings.answerTimeoutMinutes + 10;
       let keepOpen = false;
       try {
-        const asking = askIn(page, message);
+        const asking = askIn(page, message, options);
         asking.catch(() => undefined); // still running when given up on
         return await within(asking, limitMinutes * 60_000, () => {
           throw new ChatGptUnavailable(
@@ -523,7 +571,7 @@ export function createChatGpt(settings) {
     busy = true;
     const item = queue.shift();
     self
-      .askNow(item.message)
+      .askNow(item.message, item.options)
       .then(item.resolve, item.reject)
       .finally(() => {
         busy = false;

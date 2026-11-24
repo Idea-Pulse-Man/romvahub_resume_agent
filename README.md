@@ -9,7 +9,8 @@ For each application it:
 
 1. asks romva.space for the next one (each application goes to one worker only —
    this agent, the Chrome extension, or the local API),
-2. opens a new ChatGPT chat with the Profile's Resume prompt and the job post,
+2. opens a new ChatGPT chat, with Web search on, with the Profile's Resume
+   prompt and the job post,
 3. sends the answer to romva.space, which builds the Resume (the Profile's Word
    template + PDF) and attaches it to the application,
 4. does the same for the cover letter,
@@ -130,4 +131,5 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Purge   # deletes them
 | `chrome.profileDir` | `%LOCALAPPDATA%\RomvaResumeAgent\chrome` | ChatGPT sign-in lives here |
 | `chrome.debugPort` | `9334` | |
 | `chrome.temporaryChat` | `true` | keep chats out of ChatGPT history |
+| `chrome.resumeWebSearch` | `true` | the Resume chats start with ChatGPT's Web search on |
 | `chrome.answerTimeoutMinutes` | `8` | |

@@ -41,6 +41,8 @@ export const DEFAULTS = {
     debugPort: 9334,
     url: 'https://chatgpt.com/',
     temporaryChat: true,
+    /** The Resume chats start with ChatGPT's Web search on (the cover letter's do not). */
+    resumeWebSearch: true,
     answerTimeoutMinutes: 8,
   },
 };
