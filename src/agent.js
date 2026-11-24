@@ -5,6 +5,7 @@ import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
 import { DATA_DIR, TOKEN_HELP, loadConfig, readSavedConfig } from './config.js';
+import { FINISHED_TEXT, draftMarks, withDraftsPointedOut } from './draft-text.js';
 import { log } from './log.js';
 
 /**
@@ -173,21 +174,38 @@ async function makeLetter(api, chatgpt, config, job, message) {
  * sections being made. The second answer is handed in as it is (romva.space
  * refuses it if it is still incomplete, and the application is tried later).
  * Both chats start with ChatGPT's Web search on (chrome.resumeWebSearch).
+ *
+ * A draft for the candidate to finish ("[Confirm official job title]", "by
+ * X%") is asked for again the same way: see draft-text.js.
  */
 async function askForResume(api, chatgpt, config, job) {
   const options = { webSearch: config.chrome.resumeWebSearch !== false };
-  const answer = await chatgpt.ask(job.resumeMessage, options);
+  const answer = await chatgpt.ask(`${job.resumeMessage}\n\n${FINISHED_TEXT}`, options);
   let check;
   try {
     check = await api.checkResume(job.bidId, answer);
   } catch (error) {
-    // An older romva.space without the check: hand the answer in as before.
-    if (error instanceof ApiError && error.status === 404) return answer;
-    throw error;
+    // An older romva.space without the check: only the draft check.
+    if (!(error instanceof ApiError && error.status === 404)) throw error;
+    check = { ok: true };
   }
-  if (check.ok || !check.retryMessage) return answer;
-  log.warn('Resume answer incomplete; asking ChatGPT again', { company: job.company, problems: check.problems });
-  return chatgpt.ask(check.retryMessage, options);
+  const incomplete = !check.ok && Boolean(check.retryMessage);
+  const drafts = draftMarks(answer);
+  if (!incomplete && !drafts.length) return answer;
+
+  let retry = job.resumeMessage;
+  if (incomplete) {
+    log.warn('Resume answer incomplete; asking ChatGPT again', { company: job.company, problems: check.problems });
+    retry = check.retryMessage;
+  }
+  if (drafts.length) {
+    log.warn('Resume answer is a draft (placeholders); asking ChatGPT again', { company: job.company, drafts });
+    retry = withDraftsPointedOut(retry, drafts);
+  }
+  const second = await chatgpt.ask(`${retry}\n\n${FINISHED_TEXT}`, options);
+  const left = draftMarks(second);
+  if (left.length) log.warn('Resume answer still has placeholders; handed in as it is', { company: job.company, drafts: left });
+  return second;
 }
 
 async function makeOne(api, chatgpt, config, job) {

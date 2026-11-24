@@ -19,6 +19,12 @@ For each application it:
 
 Each chat is a temporary chat in its own tab, closed when it is done.
 
+ChatGPT's thinking models (Medium, High) tend to answer with a draft for the
+candidate to finish ("[Confirm official job title]", "by X%", "(verify
+proficiency)"). So each Resume request says the answer goes into the Resume
+word for word, and a draft answer is asked for once more with its placeholders
+quoted (the log says so; one still left after that is noted in the log).
+
 Applications are taken in the order of the Applications list (No 1, 2, 3…).
 For each one the agent makes whatever is missing — the Resume and cover
 letter, or just the cover letter if the Resume is already there (it failed,
