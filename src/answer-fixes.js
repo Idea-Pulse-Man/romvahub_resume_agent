@@ -50,7 +50,8 @@ export function nameSkillGroups(answer) {
       named[split[1]] = split[2].trim();
       changed = true;
     } else {
-      if (TAG_NAME.test(name)) unnamed.push(name.trim());
+      // An empty group is romva.space's to report ("the skills are empty").
+      if (TAG_NAME.test(name) && !(typeof value === 'string' && !value.trim())) unnamed.push(name.trim());
       named[name] = value;
     }
   }

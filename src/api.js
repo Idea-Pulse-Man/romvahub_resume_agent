@@ -8,17 +8,27 @@ import { TOKEN_HELP } from './config.js';
  * email, password or sign-in; it works until its end date or until revoked.
  */
 
-/** `status` 0: romva.space could not be reached at all (network down, timed out). */
+/**
+ * `status` 0: romva.space could not be reached at all (network down, timed
+ * out). `hosting`: the answer came from Vercel, not from romva.space — the
+ * site itself is off (e.g. 402 DEPLOYMENT_DISABLED: the Vercel account's plan
+ * or payment).
+ */
 export class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, { hosting = false } = {}) {
     super(message);
     this.status = status;
+    this.hosting = hosting;
   }
 }
 
-/** Not the application's fault: romva.space unreachable or in trouble (a 502 is a bad answer, so it is not one). */
+/**
+ * Not the application's fault: romva.space unreachable, switched off on
+ * Vercel, or in trouble (a 502 from romva.space itself is a bad answer, so it
+ * is not one).
+ */
 export function isTemporary(error) {
-  return error instanceof ApiError && (error.status === 0 || (error.status >= 500 && error.status !== 502));
+  return error instanceof ApiError && (error.status === 0 || error.hosting || (error.status >= 500 && error.status !== 502));
 }
 
 /** `worker`: this computer's name, sent with every step so romva.space knows the hold is still ours. */
@@ -51,6 +61,17 @@ export function createApi(baseUrl, worker, token) {
       data = null;
     }
     if (!response.ok) {
+      const vercelError = response.headers.get('x-vercel-error');
+      if (vercelError) {
+        throw new ApiError(
+          response.status,
+          `romva.space is switched off on Vercel (${response.status} ${vercelError}). ` +
+            (response.status === 402
+              ? "Check the Vercel account's billing and usage limits."
+              : 'Check the deployment on Vercel.'),
+          { hosting: true },
+        );
+      }
       const message = data?.error?.message || data?.message || `${response.status} ${response.statusText}`;
       throw new ApiError(response.status, response.status === 401 ? `The Romva token was refused: ${message} ${TOKEN_HELP}` : message);
     }
