@@ -5,6 +5,7 @@ import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
 import { DATA_DIR, TOKEN_HELP, loadConfig, readSavedConfig } from './config.js';
+import { nameSkillGroups } from './answer-fixes.js';
 import { FINISHED_TEXT, draftMarks, withDraftsPointedOut } from './draft-text.js';
 import { log } from './log.js';
 
@@ -195,9 +196,18 @@ function keepAnswer(job, label, text) {
   }
 }
 
+/** ChatGPT's answer with its skill groups named (answer-fixes.js); the groups it left unnamed, as problems. */
+async function askResumeChat(chatgpt, message, options, job) {
+  const raw = await chatgpt.ask(`${message}\n\n${FINISHED_TEXT}`, options);
+  const { text, unnamed } = nameSkillGroups(raw);
+  if (text !== raw) log.info('Named the skill groups ChatGPT called "Skill-Group-N"', { company: job.company });
+  return { text, unnamed: unnamed.map((name) => `a skill group named "${name}" instead of its own name`) };
+}
+
 async function askForResume(api, chatgpt, config, job) {
   const options = { webSearch: config.chrome.resumeWebSearch !== false };
-  const answer = await chatgpt.ask(`${job.resumeMessage}\n\n${FINISHED_TEXT}`, options);
+  const first = await askResumeChat(chatgpt, job.resumeMessage, options, job);
+  const answer = first.text;
   let check;
   try {
     check = await api.checkResume(job.bidId, answer);
@@ -207,7 +217,7 @@ async function askForResume(api, chatgpt, config, job) {
     check = { ok: true };
   }
   const incomplete = !check.ok && Boolean(check.retryMessage);
-  const drafts = draftMarks(answer);
+  const drafts = [...draftMarks(answer), ...first.unnamed];
   if (!incomplete && !drafts.length) return answer;
 
   const kept = keepAnswer(job, 'first', answer);
@@ -220,13 +230,13 @@ async function askForResume(api, chatgpt, config, job) {
     log.warn('Resume answer is a draft (placeholders); asking ChatGPT again', { company: job.company, drafts, answer: kept });
     retry = withDraftsPointedOut(retry, drafts);
   }
-  const second = await chatgpt.ask(`${retry}\n\n${FINISHED_TEXT}`, options);
-  const keptSecond = keepAnswer(job, 'second', second);
-  const left = draftMarks(second);
+  const second = await askResumeChat(chatgpt, retry, options, job);
+  const keptSecond = keepAnswer(job, 'second', second.text);
+  const left = [...draftMarks(second.text), ...second.unnamed];
   if (left.length) {
     log.warn('Resume answer still has placeholders; handed in as it is', { company: job.company, drafts: left, answer: keptSecond });
   }
-  return second;
+  return second.text;
 }
 
 async function makeOne(api, chatgpt, config, job) {
