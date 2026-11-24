@@ -160,19 +160,43 @@ const IN_PAGE = {
   freshChat: `(() => !location.pathname.startsWith('/c/')
     && document.querySelectorAll('pre').length === 0
     && !/(You said:|ChatGPT said:)/.test(document.body.innerText || ''))()`,
+  /**
+   * ChatGPT's reply, and whether it is still being written or finished.
+   *
+   * The reply is what follows chatgpt.com's last "ChatGPT said:" heading (one
+   * for screen readers, in front of each reply) — never the question. A long
+   * question is shown folded ("Show more") without its last line, the request
+   * marker; the marker is also in the page's header, above the chat, and the
+   * text after that one is the whole question. Its INPUT example
+   * ({"target_company": …}) was taken for the answer, and the Resume's
+   * summary, skills and experience were all "empty". So the marker is only
+   * the fallback, for a page without the heading (chatgpt.com changed).
+   */
   answer: (marker) => `(() => {
-    const pres = Array.from(document.querySelectorAll('pre'), (p) => p.innerText || '');
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let said = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (/^\\s*ChatGPT said:?\\s*$/i.test(node.nodeValue || '')) said = node;
+    }
+    const inReply = (el) => !said || Boolean(said.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const pres = Array.from(document.querySelectorAll('pre')).filter(inReply).map((p) => p.innerText || '');
     const body = document.body.innerText || '';
-    const at = body.lastIndexOf(${JSON.stringify(marker)});
-    const tail = at >= 0 ? body.slice(at + ${marker.length}) : '';
-    const labels = Array.from(document.querySelectorAll('button'), (b) =>
-      ((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-testid') || '')).trim());
-    const streaming = labels.some((label) => /\\bstop\\b|stop[-_ ]?(generating|streaming|response|button)/i.test(label));
-    // The buttons under a finished answer. The question has its own "Copy
+    let tail = '';
+    if (said) {
+      const at = body.lastIndexOf((said.nodeValue || '').trim());
+      tail = at >= 0 ? body.slice(at + (said.nodeValue || '').trim().length) : '';
+    } else {
+      const at = body.lastIndexOf(${JSON.stringify(marker)});
+      tail = at >= 0 ? body.slice(at + ${marker.length}) : '';
+    }
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-testid') || '')).trim();
+    const streaming = buttons.some((b) => /\\bstop\\b|stop[-_ ]?(generating|streaming|response|button)/i.test(label(b)));
+    // The buttons under a finished reply. The question has its own "Copy
     // message", and a code block its "Copy code": neither counts.
-    const finished = labels.some((label) => /^(copy|read aloud|more actions|good response|bad response)\\b/i.test(label)
-      && !/^copy (message|code)\\b/i.test(label));
-    return { pres, tail, streaming, finished };
+    const finished = buttons.filter(inReply).some((b) => /^(copy|read aloud|more actions|good response|bad response)\\b/i.test(label(b))
+      && !/^copy (message|code)\\b/i.test(label(b)));
+    return { pres, tail, streaming, finished, reply: Boolean(said) };
   })()`,
   click: `(() => {
     const button = Array.from(document.querySelectorAll(${JSON.stringify(SELECTORS.send)}))
@@ -467,8 +491,9 @@ export function createChatGpt(settings) {
       if (answer.finished && text && still >= 2000) return text;
       // Every question asks for JSON: no braces, no answer yet.
       if (!/\{[\s\S]*\}/.test(text)) continue;
-      if (sawStreaming && still >= 2000 && wholeJson(text)) return text;
-      if (still >= NO_SIGN_MS) {
+      // Only within the reply: text found by the marker may be the question's.
+      if (answer.reply && sawStreaming && still >= 2000 && wholeJson(text)) return text;
+      if (still >= NO_SIGN_MS && (answer.reply || answer.pres.length > 0)) {
         if (!warnedNoSign) {
           warnedNoSign = true;
           log.warn('ChatGPT showed no sign of finishing (chatgpt.com changed?); took the answer after 2 minutes unchanged');
