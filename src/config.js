@@ -34,14 +34,17 @@ export const DEFAULTS = {
   workerName: `agent · ${hostname()}`,
   /** How often to ask for the next application when idle, in seconds. */
   pollSeconds: 20,
-  /** The Chrome window the agent uses for ChatGPT. */
+  /** The AI website asked for the Resumes and cover letters: "chatgpt", "claude" or "gemini" (sites.js). */
+  ai: 'chatgpt',
+  /** The Chrome window the agent uses for the AI website (signed in there once). */
   chrome: {
     path: '',
     profileDir: path.join(localAppData, 'RomvaResumeAgent', 'chrome'),
     debugPort: 9334,
+    /** ChatGPT's address; Claude and Gemini have theirs in sites.js. */
     url: 'https://chatgpt.com/',
     temporaryChat: true,
-    /** The Resume chats start with ChatGPT's Web search on (the cover letter's do not). */
+    /** The Resume chats start with web search on, where the site lets the agent choose it (ChatGPT). */
     resumeWebSearch: true,
     answerTimeoutMinutes: 8,
   },

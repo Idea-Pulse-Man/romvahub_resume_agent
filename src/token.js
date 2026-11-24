@@ -1,7 +1,9 @@
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createApi } from './api.js';
+import { createChat } from './chat.js';
 import { loadConfig, saveConfig, updateConfig } from './config.js';
+import { SITES, siteFor } from './sites.js';
 
 /**
  * For the GUI (gui/RomvaAgent.exe). Never prints the token itself.
@@ -13,6 +15,11 @@ import { loadConfig, saveConfig, updateConfig } from './config.js';
  *                              ← a folder on stdin: checked (made, and written to once), then saved
  *                              → {"ok":true,"saveDir":"…"} or {"ok":false,"error":"…"}
  *                                (the running agent uses it from its next files on: no restart)
+ *   node src/token.js ai       ← nothing: → {"ok":true,"ai":"chatgpt","sites":[{"id","name","host"}…]}
+ *                              ← a site id on stdin (chatgpt | claude | gemini): saved
+ *                              → {"ok":true,"ai":"claude",…} (the agent uses it from its next start)
+ *   node src/token.js open     → the agent's Chrome window on the AI site, in front (to sign in there)
+ *                              → {"ok":true,"site":"Claude"} or {"ok":false,"error":"…"}
  */
 
 function print(value) {
@@ -72,9 +79,37 @@ async function folder() {
   print({ ok: true, saveDir });
 }
 
-const commands = { set, status, folder };
+function aiStatus(id) {
+  return {
+    ok: true,
+    ai: siteFor(id).id,
+    sites: Object.values(SITES).map((site) => ({ id: site.id, name: site.name, host: site.host })),
+  };
+}
+
+async function ai() {
+  const wanted = (await readStdin()).toLowerCase();
+  if (!wanted) return print(aiStatus(loadConfig().ai));
+  if (!SITES[wanted]) return print({ ok: false, error: `Unknown AI site "${wanted}". Use: ${Object.keys(SITES).join(', ')}.` });
+  updateConfig({ ai: wanted });
+  print(aiStatus(wanted));
+}
+
+async function open() {
+  const config = loadConfig();
+  const site = siteFor(config.ai);
+  const chat = createChat(config.chrome, site);
+  try {
+    await chat.open();
+    print({ ok: true, site: site.name, host: site.host });
+  } finally {
+    chat.disconnect();
+  }
+}
+
+const commands = { set, status, folder, ai, open };
 const command = commands[process.argv[2]];
-(command ? command() : Promise.reject(new Error('Use: status | set | folder')))
+(command ? command() : Promise.reject(new Error(`Use: ${Object.keys(commands).join(' | ')}`)))
   // No process.exit(): right after a fetch it can trip a Node bug on Windows. Node ends by itself.
   .catch((error) => {
     print({ ok: false, error: error.message });

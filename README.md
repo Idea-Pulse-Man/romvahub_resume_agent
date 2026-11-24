@@ -1,23 +1,31 @@
 # Romva Resume Agent (Windows)
 
 Makes the Resume and cover letter for every new **Draft** application on
-romva.space, in the background, with **your own signed-in ChatGPT** — no API
-key. A small window (`gui\RomvaAgent.exe`, ~35 KB) runs it, shows its log, and
-holds the token; it starts with Windows, in the tray.
+romva.space, in the background, with **your own signed-in AI website** —
+**ChatGPT** (chatgpt.com), **Claude** (claude.ai) or **Gemini**
+(gemini.google.com), chosen in the window — no API key. A small window
+(`gui\RomvaAgent.exe`, ~35 KB) runs it, shows its log, and holds the token; it
+starts with Windows, in the tray.
+
+Below, "ChatGPT" stands for whichever AI website is chosen; where they differ,
+it says so.
 
 For each application it:
 
 1. asks romva.space for the next one (each application goes to one worker only —
    this agent, the Chrome extension, or the local API),
-2. opens a new ChatGPT chat, with Web search on, with the Profile's Resume
-   prompt and the job post,
+2. opens a new ChatGPT chat, with web search on, with the Profile's Resume
+   prompt and the job post (ChatGPT: the agent turns Web search on; Claude:
+   turn Web search on once in claude.ai's tools menu, it stays on; Gemini
+   searches Google by itself),
 3. sends the answer to romva.space, which builds the Resume (the Profile's Word
    template + PDF) and attaches it to the application,
 4. does the same for the cover letter,
 5. saves the five files to `<save folder>\<Profile>\<Company_Role>\`:
    job description (.txt), Resume (.pdf, .docx), cover letter (.pdf, .docx).
 
-Each chat is a temporary chat in its own tab, closed when it is done.
+Each chat is a temporary chat (Claude: incognito) in its own tab, closed when
+it is done.
 
 ChatGPT's thinking models (Medium, High) tend to answer with a draft for the
 candidate to finish ("[Confirm official job title]", "by X%", "(verify
@@ -27,9 +35,10 @@ quoted (the log says so; one still left after that is noted in the log).
 Every answer asked for again is kept in `%APPDATA%\RomvaResumeAgent\answers\`
 (the newest 30), to see what ChatGPT wrote.
 
-An answer is taken when chatgpt.com shows it finished (the Copy / Read aloud
-buttons under it), not when the page stops changing: a thinking model thinks
-and searches for long stretches with nothing changing on the page.
+An answer is taken when the site shows it finished (the Copy / Read aloud /
+Redo buttons under the reply), not when the page stops changing: a thinking
+model thinks and searches for long stretches with nothing changing on the
+page. Only the reply is read, never the question.
 
 Applications are taken in the order of the Applications list (No 1, 2, 3…).
 For each one the agent makes whatever is missing — the Resume and cover
@@ -42,7 +51,7 @@ work carries on.
 
 - Windows 10/11, **Node.js 20+** (https://nodejs.org), **Google Chrome** (or Edge)
 - a Romva token for the Profile (from the Super Admin, romva.space → Tokens)
-- a ChatGPT account (sign in once in the agent's Chrome window)
+- a ChatGPT, Claude or Google (Gemini) account (sign in once in the agent's Chrome window)
 
 ## Install
 
@@ -58,8 +67,9 @@ so:
 2. **Save folder…** — pick where the Resumes are saved (default `Documents\Resume`),
 3. **Start**.
 
-When the agent first needs ChatGPT, a Chrome window opens on chatgpt.com — sign
-in there once.
+Pick the **AI** (ChatGPT, Claude or Gemini) and click **Sign in…**: the
+agent's Chrome window opens on that website — sign in there once (it is
+remembered). Signed in to more than one, you can switch any time.
 
 (`npm run setup` still works from a terminal, to change this computer's name.)
 
@@ -74,6 +84,10 @@ in there once.
 - **Token:** whether one is saved, its Profile and end date. The token itself
   is never shown; **Change token…** replaces it (checked with romva.space
   first, so a wrong one is never saved).
+- **AI:** the website that writes the Resumes and cover letters — ChatGPT,
+  Claude or Gemini. Changing it restarts a running agent to use it.
+  **Sign in…** brings the agent's Chrome window up on that website, to sign
+  in there once.
 - **Save to:** the save folder; **Save folder…** changes it (it is made and
   written to once first), **Open** opens it. A running agent uses a new folder
   from its next files on — no restart.
@@ -107,7 +121,11 @@ read and can be deleted.)
 - Settings: `%APPDATA%\RomvaResumeAgent\config.json` (or run `npm run setup` again)
 - Without the window (in a terminal): `npm start` — one application only: `npm run once`
 - Leave the agent's Chrome window open (minimised is fine). If ChatGPT signs
-  out, the agent waits and carries on once you sign in again.
+  out, the agent waits and carries on once you sign in again. A "signed out"
+  that lasts only a moment (ChatGPT renewing its session) is checked again
+  after a reload before the agent pauses, and a tab left on a sign-in or error
+  page never holds the agent up for more than 10 minutes: the website itself
+  is looked at then.
 - A proxy extension in the agent's Chrome (e.g. SmartProxy) that sends
   chatgpt.com through a proxy with a password can fail now and then
   (`net::ERR_INVALID_AUTH_CREDENTIALS`). The agent then pauses and tries
@@ -139,9 +157,11 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Purge   # deletes them
 | `saveDir` | `Documents\Resume` | where the folders go (the window's **Save folder…**) |
 | `workerName` | `agent · <computer>` | shown on romva.space |
 | `pollSeconds` | `20` | how often to look for new applications |
+| `ai` | `chatgpt` | `chatgpt`, `claude` or `gemini` (the window's **AI**) |
 | `chrome.path` | first Chrome/Edge found | |
-| `chrome.profileDir` | `%LOCALAPPDATA%\RomvaResumeAgent\chrome` | ChatGPT sign-in lives here |
+| `chrome.profileDir` | `%LOCALAPPDATA%\RomvaResumeAgent\chrome` | the AI websites' sign-ins live here |
 | `chrome.debugPort` | `9334` | |
-| `chrome.temporaryChat` | `true` | keep chats out of ChatGPT history |
+| `chrome.url` | `https://chatgpt.com/` | ChatGPT's address |
+| `chrome.temporaryChat` | `true` | keep chats out of the chat history (ChatGPT temporary chat, Claude incognito) |
 | `chrome.resumeWebSearch` | `true` | the Resume chats start with ChatGPT's Web search on |
 | `chrome.answerTimeoutMinutes` | `8` | |

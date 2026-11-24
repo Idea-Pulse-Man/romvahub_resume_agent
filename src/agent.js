@@ -3,7 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
-import { ChatGptUnavailable, createChatGpt } from './chatgpt.js';
+import { ChatUnavailable, createChat } from './chat.js';
+import { siteFor } from './sites.js';
 import { DATA_DIR, TOKEN_HELP, loadConfig, readSavedConfig } from './config.js';
 import { nameSkillGroups } from './answer-fixes.js';
 import { FINISHED_TEXT, draftMarks, withDraftsPointedOut } from './draft-text.js';
@@ -11,8 +12,9 @@ import { log } from './log.js';
 
 /**
  * Romva Resume Agent: makes the Resume and cover letter for each new Draft
- * application on romva.space, in the background, with this computer's
- * signed-in ChatGPT.
+ * application on romva.space, in the background, with an AI website signed
+ * in on this computer: ChatGPT, Claude or Gemini (config.json "ai", sites.js).
+ * "ChatGPT" below stands for whichever it is.
  *
  *   1. ask romva.space for the next application (it hands out each one to one
  *      worker only — this agent, the Chrome extension, or the local API)
@@ -150,17 +152,17 @@ function keepHolding(api, job) {
  * do (ChatGPT unavailable, romva.space unreachable, the application gone to
  * another worker), else as a plain error for the application to be counted.
  */
-async function makeLetter(api, chatgpt, config, job, message) {
+async function makeLetter(api, chat, config, job, message) {
   let lastError;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     let letter;
     try {
-      const letterAnswer = await chatgpt.ask(message);
+      const letterAnswer = await chat.ask(message);
       letter = await api.submitCoverLetter(job.bidId, letterAnswer);
     } catch (error) {
       // ChatGPT cannot be used (signed out…): no second try now. The agent
       // pauses, and the application comes back as a letter-only job — uncounted.
-      if (error instanceof ChatGptUnavailable) throw error;
+      if (error instanceof ChatUnavailable) throw error;
       if ((error instanceof ApiError && error.status === 409) || isTemporary(error)) throw error;
       lastError = error;
       log.warn(`Cover letter attempt ${attempt} failed`, { company: job.company, error: error.message });
@@ -204,16 +206,16 @@ function keepAnswer(job, label, text) {
 }
 
 /** ChatGPT's answer with its skill groups named (answer-fixes.js); the groups it left unnamed, as problems. */
-async function askResumeChat(chatgpt, message, options, job) {
-  const raw = await chatgpt.ask(`${message}\n\n${FINISHED_TEXT}`, options);
+async function askResumeChat(chat, message, options, job) {
+  const raw = await chat.ask(`${message}\n\n${FINISHED_TEXT}`, options);
   const { text, unnamed } = nameSkillGroups(raw);
-  if (text !== raw) log.info('Named the skill groups ChatGPT called "Skill-Group-N"', { company: job.company });
+  if (text !== raw) log.info(`Named the skill groups ${chat.site.name} called "Skill-Group-N"`, { company: job.company });
   return { text, unnamed: unnamed.map((name) => `a skill group named "${name}" instead of its own name`) };
 }
 
-async function askForResume(api, chatgpt, config, job) {
+async function askForResume(api, chat, config, job) {
   const options = { webSearch: config.chrome.resumeWebSearch !== false };
-  const first = await askResumeChat(chatgpt, job.resumeMessage, options, job);
+  const first = await askResumeChat(chat, job.resumeMessage, options, job);
   const answer = first.text;
   let check;
   try {
@@ -230,14 +232,14 @@ async function askForResume(api, chatgpt, config, job) {
   const kept = keepAnswer(job, 'first', answer);
   let retry = job.resumeMessage;
   if (incomplete) {
-    log.warn('Resume answer incomplete; asking ChatGPT again', { company: job.company, problems: check.problems, answer: kept });
+    log.warn(`Resume answer incomplete; asking ${chat.site.name} again`, { company: job.company, problems: check.problems, answer: kept });
     retry = check.retryMessage;
   }
   if (drafts.length) {
-    log.warn('Resume answer is a draft (placeholders); asking ChatGPT again', { company: job.company, drafts, answer: kept });
+    log.warn(`Resume answer is a draft (placeholders); asking ${chat.site.name} again`, { company: job.company, drafts, answer: kept });
     retry = withDraftsPointedOut(retry, drafts);
   }
-  const second = await askResumeChat(chatgpt, retry, options, job);
+  const second = await askResumeChat(chat, retry, options, job);
   const keptSecond = keepAnswer(job, 'second', second.text);
   const left = [...draftMarks(second.text), ...second.unnamed];
   if (left.length) {
@@ -246,19 +248,19 @@ async function askForResume(api, chatgpt, config, job) {
   return second.text;
 }
 
-async function makeOne(api, chatgpt, config, job) {
+async function makeOne(api, chat, config, job) {
   const stopHolding = keepHolding(api, job);
   try {
     if (job.letterOnly) {
       log.info(`Making the cover letter for #${job.number ?? '?'} ${job.company} — ${job.role}`);
-      await makeLetter(api, chatgpt, config, job, job.coverLetterMessage);
+      await makeLetter(api, chat, config, job, job.coverLetterMessage);
       return;
     }
     log.info(`Making #${job.number ?? '?'} ${job.company} — ${job.role}`);
-    const resumeAnswer = await askForResume(api, chatgpt, config, job);
+    const resumeAnswer = await askForResume(api, chat, config, job);
     const resume = await api.submitResume(job.bidId, resumeAnswer);
     await saveQuietly(config, job, resume.files, 'Resume');
-    await makeLetter(api, chatgpt, config, job, resume.coverLetterMessage);
+    await makeLetter(api, chat, config, job, resume.coverLetterMessage);
   } finally {
     stopHolding();
   }
@@ -300,10 +302,12 @@ async function main() {
   }
 
   const api = createApi(config.apiUrl, config.workerName, config.token);
-  const chatgpt = createChatGpt(config.chrome);
+  const site = siteFor(config.ai);
+  const chat = createChat(config.chrome, site);
   const me = await whoAmI(api);
   log.info(`Romva Resume Agent started`, {
     profile: me?.token?.profile?.name,
+    ai: site.name,
     tokenExpires: me?.token?.expiresAt?.slice(0, 10) ?? 'never',
     worker: config.workerName,
     saveDir: config.saveDir,
@@ -324,7 +328,7 @@ async function main() {
     })
     .catch((error) => log.warn('Could not hand back the previous run\'s applications', { error: error.message }));
 
-  let waitingForChatGpt = false;
+  let waitingForChat = false;
   let stoppedLogged = false;
   let checkedInAt = 0;
   // Paused for ChatGPT: not before `resumeAfter`. A pause that comes back
@@ -339,8 +343,8 @@ async function main() {
   while (true) {
     try {
       // Signed out of ChatGPT last time: look at the window (no reload) until it is back.
-      if (waitingForChatGpt) {
-        if (Date.now() < resumeAfter || !(await chatgpt.ready())) {
+      if (waitingForChat) {
+        if (Date.now() < resumeAfter || !(await chat.ready())) {
           // Still check in, so romva.space shows this computer as up (and why it waits).
           if (Date.now() - checkedInAt >= HEARTBEAT_MS) {
             checkedInAt = Date.now();
@@ -349,9 +353,9 @@ async function main() {
           await sleep(config.pollSeconds * 1000);
           continue;
         }
-        waitingForChatGpt = false;
+        waitingForChat = false;
         resumedAt = Date.now();
-        log.info('ChatGPT is ready again');
+        log.info(`${site.name} is ready again`);
       }
 
       const { enabled, job } = await api.claim();
@@ -376,14 +380,14 @@ async function main() {
       idleWaitMs = config.pollSeconds * 1000;
 
       try {
-        await makeOne(api, chatgpt, config, job);
+        await makeOne(api, chat, config, job);
       } catch (error) {
-        if (error instanceof ChatGptUnavailable) {
+        if (error instanceof ChatUnavailable) {
           pauses = resumedAt && Date.now() - resumedAt < 10 * 60_000 ? pauses + 1 : 1;
           const holdMs = Math.min(10 * 60_000, 30_000 * 2 ** (pauses - 1));
           resumeAfter = Date.now() + holdMs;
           log.warn(`Paused: ${error.message} Trying again in ${Math.round(holdMs / 1000)} s at the earliest.`);
-          waitingForChatGpt = true;
+          waitingForChat = true;
           await api.release(job.bidId, false, error.message).catch(() => undefined);
         } else if (error instanceof ApiError && error.status === 409) {
           // Our hold ran out and the application went to another worker (or was
