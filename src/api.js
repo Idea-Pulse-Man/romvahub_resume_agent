@@ -32,8 +32,11 @@ export function isTemporary(error) {
 }
 
 /** `worker`: this computer's name, sent with every step so romva.space knows the hold is still ours. */
-export function createApi(baseUrl, worker, token) {
+export function createApi(baseUrl, worker, initialToken) {
   const base = baseUrl.replace(/\/+$/, '');
+  // The romva hub desktop app runs the agent with a short-lived sign-in and
+  // sends a fresh one on stdin as it renews (agent.js, ROMVA_TOKEN_STDIN).
+  let token = initialToken;
 
   async function call(path, { method = 'GET', body } = {}) {
     if (!token) throw new ApiError(401, `No Romva token. ${TOKEN_HELP}`);
@@ -82,6 +85,10 @@ export function createApi(baseUrl, worker, token) {
   const authed = call;
 
   return {
+    /** A renewed sign-in from the desktop app. */
+    setToken: (next) => {
+      token = next;
+    },
     /** { token: { label, profile: { id, name } } }: the Profile this token acts as. */
     me: () => authed('/api/auth/me'),
     /** The next application; `letterOnly` jobs (a stored Resume missing its cover letter) included. */

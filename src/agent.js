@@ -302,6 +302,20 @@ async function main() {
   }
 
   const api = createApi(config.apiUrl, config.workerName, config.token);
+  // The romva hub desktop app: a renewed sign-in arrives as a "token <value>" line.
+  if (process.env.ROMVA_TOKEN_STDIN === '1') {
+    let pending = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      pending += chunk;
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        const match = /^token\s+(\S+)$/.exec(line.trim());
+        if (match) api.setToken(match[1]);
+      }
+    });
+  }
   const site = siteFor(config.ai);
   const chat = createChat(config.chrome, site);
   const me = await whoAmI(api);

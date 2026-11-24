@@ -70,6 +70,9 @@ export function loadConfig() {
     ...saved,
     // ROMVA_TOKEN: a token from the environment instead (a second agent, or a test).
     token: process.env.ROMVA_TOKEN || saved.token || '',
+    // The romva hub desktop app also passes its server and AI website.
+    ...(process.env.ROMVA_API_URL ? { apiUrl: process.env.ROMVA_API_URL } : {}),
+    ...(process.env.ROMVA_AI ? { ai: process.env.ROMVA_AI } : {}),
     chrome: { ...DEFAULTS.chrome, ...(saved.chrome ?? {}) },
   };
 }
