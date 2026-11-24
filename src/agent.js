@@ -126,15 +126,22 @@ async function saveQuietly(config, job, files, what) {
  */
 function keepHolding(api, job) {
   let warned = false;
+  let stopped = false;
   const timer = setInterval(() => {
     api.heartbeat(job.bidId).catch((error) => {
+      // A heartbeat still on its way when the application was finished is
+      // answered "not yours" (it is done): not worth a warning.
+      if (stopped) return;
       if (error instanceof ApiError && error.status === 409 && !warned) {
         warned = true;
         log.warn('romva.space says this application is no longer ours', { company: job.company });
       }
     });
   }, HEARTBEAT_MS);
-  return () => clearInterval(timer);
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 /**
