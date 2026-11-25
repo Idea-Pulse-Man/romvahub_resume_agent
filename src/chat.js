@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import puppeteer from 'puppeteer-core';
+import { keepFile } from './keep.js';
 import { log } from './log.js';
 import { SIGN_IN_BUTTON } from './sites.js';
 
@@ -429,7 +430,23 @@ export function createChat(settings, site) {
     }
   }
 
-  async function askIn(page, message, { webSearch = false } = {}) {
+  /**
+   * What the page showed, for an answer that could not be used: its reply,
+   * buttons and end of page, and a screenshot, kept in answers\ (keep.js).
+   * Where they were kept: { page, screenshot }.
+   */
+  async function keepPage(page, marker, name, label) {
+    const state = await bounded(page.evaluate(IN_PAGE.state(site, marker)), 15_000, 'Reading the page')
+      .catch((failed) => ({ error: failed.message }));
+    const shot = await bounded(page.screenshot({ type: 'png' }), 15_000, 'Taking a screenshot').catch(() => undefined);
+    return {
+      page: keepFile(name, label, JSON.stringify(state, null, 2)),
+      ...(shot ? { screenshot: keepFile(name, label, Buffer.from(shot), 'png') } : {}),
+    };
+  }
+
+  /** `name`: what the chat is for (the company), in the names of the files keepPage keeps. */
+  async function askIn(page, message, { webSearch = false, name = '' } = {}) {
     // Not brought to the front: a new tab is already the active one in its
     // window, and focusing the window would pull the person away from an
     // application form they are filling in.
@@ -497,7 +514,14 @@ export function createChat(settings, site) {
       const text = answerText(answer);
       const still = Date.now() - stableSince;
       // Finished, JSON or not (a question back is reported by romva.space, and asked again).
-      if (answer.finished && text && still >= 2000) return text;
+      if (answer.finished && text && still >= 2000) {
+        // Seen 2026-11-24: a finished reply whose text was only the page's
+        // footer ("ChatGPT can make mistakes…") — the answer was somewhere else.
+        if (!/\{[\s\S]*\}/.test(text)) {
+          log.warn(`${site.name}'s reply has no JSON; kept what the page showed`, await keepPage(page, marker, name, 'no-json'));
+        }
+        return text;
+      }
       // Every question asks for JSON: no braces, no answer yet.
       if (!/\{[\s\S]*\}/.test(text)) continue;
       // Only within the reply: text found by the marker may be the question's.
@@ -512,11 +536,7 @@ export function createChat(settings, site) {
     }
     const error = new Error(`${site.name} had not finished answering after ${settings.answerTimeoutMinutes} minutes.`);
     // Still thinking, an error box, a usage limit, or an answer not recognised as one: the page says which.
-    error.seen = {
-      state: await bounded(page.evaluate(IN_PAGE.state(site, marker)), 15_000, 'Reading the page')
-        .catch((failed) => ({ error: failed.message })),
-      screenshot: await bounded(page.screenshot({ type: 'png' }), 15_000, 'Taking a screenshot').catch(() => undefined),
-    };
+    error.seen = await keepPage(page, marker, name, 'unfinished');
     throw error;
   }
 

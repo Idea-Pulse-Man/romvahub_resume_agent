@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatUnavailable, createChat } from './chat.js';
@@ -8,6 +8,7 @@ import { siteFor } from './sites.js';
 import { DATA_DIR, TOKEN_HELP, loadConfig, readSavedConfig } from './config.js';
 import { nameSkillGroups } from './answer-fixes.js';
 import { FINISHED_TEXT, draftMarks, withDraftsPointedOut } from './draft-text.js';
+import { keepFile } from './keep.js';
 import { log } from './log.js';
 
 /**
@@ -157,7 +158,7 @@ async function makeLetter(api, chat, config, job, message) {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     let letter;
     try {
-      const letterAnswer = await chat.ask(message);
+      const letterAnswer = await chat.ask(message, { name: `${job.company}_letter` });
       letter = await api.submitCoverLetter(job.bidId, letterAnswer);
     } catch (error) {
       // ChatGPT cannot be used (signed out…): no second try now. The agent
@@ -188,30 +189,12 @@ async function makeLetter(api, chat, config, job, message) {
  * A draft for the candidate to finish ("[Confirm official job title]", "by
  * X%") is asked for again the same way: see draft-text.js.
  */
-/**
- * Where answers that were asked for again are kept, to see what ChatGPT wrote,
- * and what the page showed when an answer never finished (the newest 30 files).
- */
-const ANSWERS_DIR = path.join(DATA_DIR, 'answers');
-
-/** `text`: a string, or a Buffer with `extension` (a screenshot). */
-function keepAnswer(job, label, text, extension = 'txt') {
-  try {
-    mkdirSync(ANSWERS_DIR, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const company = String(job.company ?? 'job').replace(/[^\w.-]+/g, '_').slice(0, 40);
-    const file = path.join(ANSWERS_DIR, `${stamp}_${company}_${label}.${extension}`);
-    writeFileSync(file, text);
-    for (const old of readdirSync(ANSWERS_DIR).sort().reverse().slice(30)) unlinkSync(path.join(ANSWERS_DIR, old));
-    return file;
-  } catch {
-    return undefined; // Only for looking at later.
-  }
-}
+/** An answer asked for again, kept in answers\ (keep.js) to see what ChatGPT wrote. */
+const keepAnswer = (job, label, text) => keepFile(job.company, label, text);
 
 /** ChatGPT's answer with its skill groups named (answer-fixes.js); the groups it left unnamed, as problems. */
 async function askResumeChat(chat, message, options, job) {
-  const raw = await chat.ask(`${message}\n\n${FINISHED_TEXT}`, options);
+  const raw = await chat.ask(`${message}\n\n${FINISHED_TEXT}`, { ...options, name: job.company });
   const { text, unnamed } = nameSkillGroups(raw);
   if (text !== raw) log.info(`Named the skill groups ${chat.site.name} called "Skill-Group-N"`, { company: job.company });
   return { text, unnamed: unnamed.map((name) => `a skill group named "${name}" instead of its own name`) };
@@ -421,14 +404,8 @@ async function main() {
           // romva.space already counted a bad Resume answer (400/502) when it
           // refused it; everything else (a failed cover letter included) is counted here.
           const counted = error instanceof ApiError && (error.status === 400 || error.status === 502);
-          // An answer that never came: what the page showed, to see why.
-          const seen = error.seen
-            ? {
-                page: keepAnswer(job, 'unfinished', JSON.stringify(error.seen.state, null, 2)),
-                ...(error.seen.screenshot ? { screenshot: keepAnswer(job, 'unfinished', error.seen.screenshot, 'png') } : {}),
-              }
-            : {};
-          log.error(`Failed: ${job.company}`, { error: error.message, ...seen });
+          // An answer that never came: where chat.js kept what the page showed.
+          log.error(`Failed: ${job.company}`, { error: error.message, ...(error.seen ?? {}) });
           if (!counted) await api.release(job.bidId, true, error.message).catch(() => undefined);
         }
       }
