@@ -36,6 +36,8 @@ export const DEFAULTS = {
   pollSeconds: 20,
   /** The AI website asked for the Resumes and cover letters: "chatgpt", "claude" or "gemini" (sites.js). */
   ai: 'chatgpt',
+  /** Ask DeepSeek's free website for a Resume draft first, which the AI above then works from. */
+  deepseekFirst: true,
   /** The Chrome window the agent uses for the AI website (signed in there once). */
   chrome: {
     path: '',

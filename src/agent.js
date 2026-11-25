@@ -4,7 +4,8 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatUnavailable, createChat } from './chat.js';
-import { siteFor } from './sites.js';
+import { DEEPSEEK, siteFor } from './sites.js';
+import { createDrafter, withDraft } from './deepseek-draft.js';
 import { DATA_DIR, TOKEN_HELP, loadConfig, readSavedConfig } from './config.js';
 import { nameSkillGroups } from './answer-fixes.js';
 import { FINISHED_TEXT, draftMarks, withDraftsPointedOut } from './draft-text.js';
@@ -19,7 +20,9 @@ import { log } from './log.js';
  *
  *   1. ask romva.space for the next application (it hands out each one to one
  *      worker only — this agent, the Chrome extension, or the local API)
- *   2. ChatGPT, new chat: the Profile's Resume prompt + the posting → JSON
+ *   2. DeepSeek, new chat (config.json "deepseekFirst"): the same prompt → a
+ *      JSON draft; then ChatGPT, new chat: the Profile's Resume prompt + the
+ *      posting + that draft → JSON
  *   3. romva.space builds the Resume (Word template + PDF) and stores it
  *   4. ChatGPT, new chat: the cover letter prompt → JSON
  *   5. romva.space builds and stores the cover letter
@@ -200,9 +203,12 @@ async function askResumeChat(chat, message, options, job) {
   return { text, unnamed: unnamed.map((name) => `a skill group named "${name}" instead of its own name`) };
 }
 
-async function askForResume(api, chat, config, job) {
+async function askForResume(api, chat, drafter, config, job) {
   const options = { webSearch: config.chrome.resumeWebSearch !== false };
-  const first = await askResumeChat(chat, job.resumeMessage, options, job);
+  // As config.json has it now: the window's switch counts from the next application on.
+  const useDraft = (readSavedConfig()?.deepseekFirst ?? config.deepseekFirst) !== false;
+  const draft = useDraft ? await drafter(job, options) : null;
+  const first = await askResumeChat(chat, withDraft(job.resumeMessage, draft), options, job);
   const answer = first.text;
   let check;
   try {
@@ -226,7 +232,7 @@ async function askForResume(api, chat, config, job) {
     log.warn(`Resume answer is a draft (placeholders); asking ${chat.site.name} again`, { company: job.company, drafts, answer: kept });
     retry = withDraftsPointedOut(retry, drafts);
   }
-  const second = await askResumeChat(chat, retry, options, job);
+  const second = await askResumeChat(chat, withDraft(retry, draft), options, job);
   const keptSecond = keepAnswer(job, 'second', second.text);
   const left = [...draftMarks(second.text), ...second.unnamed];
   if (left.length) {
@@ -235,7 +241,7 @@ async function askForResume(api, chat, config, job) {
   return second.text;
 }
 
-async function makeOne(api, chat, config, job) {
+async function makeOne(api, chat, drafter, config, job) {
   const stopHolding = keepHolding(api, job);
   try {
     if (job.letterOnly) {
@@ -244,7 +250,7 @@ async function makeOne(api, chat, config, job) {
       return;
     }
     log.info(`Making #${job.number ?? '?'} ${job.company} — ${job.role}`);
-    const resumeAnswer = await askForResume(api, chat, config, job);
+    const resumeAnswer = await askForResume(api, chat, drafter, config, job);
     const resume = await api.submitResume(job.bidId, resumeAnswer);
     await saveQuietly(config, job, resume.files, 'Resume');
     await makeLetter(api, chat, config, job, resume.coverLetterMessage);
@@ -305,10 +311,12 @@ async function main() {
   }
   const site = siteFor(config.ai);
   const chat = createChat(config.chrome, site);
+  const drafter = createDrafter(createChat(config.chrome, DEEPSEEK));
   const me = await whoAmI(api);
   log.info(`Romva Resume Agent started`, {
     profile: me?.token?.profile?.name,
     ai: site.name,
+    deepseekFirst: config.deepseekFirst !== false,
     tokenExpires: me?.token?.expiresAt?.slice(0, 10) ?? 'never',
     worker: config.workerName,
     saveDir: config.saveDir,
@@ -381,7 +389,7 @@ async function main() {
       idleWaitMs = config.pollSeconds * 1000;
 
       try {
-        await makeOne(api, chat, config, job);
+        await makeOne(api, chat, drafter, config, job);
       } catch (error) {
         if (error instanceof ChatUnavailable) {
           pauses = resumedAt && Date.now() - resumedAt < 10 * 60_000 ? pauses + 1 : 1;

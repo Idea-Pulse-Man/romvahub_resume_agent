@@ -186,6 +186,23 @@ const IN_PAGE = {
     const body = document.body.innerText || '';
     return { url: location.href, ...answer, buttons: buttons.slice(-40), pageEnd: body.slice(-4000) };
   })()`,
+  /**
+   * Turns on the switch labelled `label` when the page shows it is off: 'on'
+   * (already), 'clicked', or 'unknown' (not found, or its state cannot be
+   * told: left alone rather than turned off).
+   */
+  toggle: (label) => `(() => {
+    const wanted = ${JSON.stringify(label.toLowerCase())};
+    const button = Array.from(document.querySelectorAll('button, [role="button"], .ds-toggle-button'))
+      .find((el) => el.offsetParent !== null && (el.innerText || '').trim().toLowerCase() === wanted);
+    if (!button) return 'unknown';
+    const pressed = button.getAttribute('aria-pressed');
+    const name = String(button.className || '');
+    if (pressed === 'true' || name.includes('--selected')) return 'on';
+    if (pressed !== 'false' && !name.includes('toggle-button')) return 'unknown';
+    button.click();
+    return 'clicked';
+  })()`,
   click: (selector) => `(() => {
     const button = Array.from(document.querySelectorAll(${JSON.stringify(selector)}))
       .find((b) => b.offsetParent !== null && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
@@ -375,6 +392,13 @@ export function createChat(settings, site) {
   }
 
   async function send(page) {
+    // No send button to name (DeepSeek): Enter in the message box, where the prompt was just typed.
+    if (!site.send) {
+      await sleep(500);
+      await page.focus(site.composer);
+      await page.keyboard.press('Enter');
+      return;
+    }
     for (let tries = 0; tries < 30; tries += 1) {
       if (await page.evaluate(IN_PAGE.click(site.send))) return;
       await sleep(500);
@@ -484,6 +508,13 @@ export function createChat(settings, site) {
       log.info(site.webSearchNote);
     }
 
+    if (webSearch) {
+      for (const label of site.toggles ?? []) {
+        const state = await page.evaluate(IN_PAGE.toggle(label)).catch(() => 'unknown');
+        if (state === 'unknown') log.info(`${site.name}: could not tell whether ${label} is on; left as it is`);
+      }
+    }
+
     const marker = `Request ${randomUUID()}`;
     await fill(page, [message, '', marker].join('\n'));
     if (searching && !(await searchOn(page, 1000))) log.warn('Web search was turned off while the prompt was typed');
@@ -521,6 +552,11 @@ export function createChat(settings, site) {
           log.warn(`${site.name}'s reply has no JSON; kept what the page showed`, await keepPage(page, marker, name, 'no-json'));
         }
         return text;
+      }
+      // A site with no "finished" sign (DeepSeek): its whole JSON, left alone for a while.
+      if (site.jsonDoneMs && answer.reply && still >= site.jsonDoneMs && wholeJson(text)) return text;
+      if (site.refusal && still >= 15_000 && text.length < 400 && !wholeJson(text) && new RegExp(site.refusal, 'i').test(text)) {
+        throw new Error(`${site.name} did not answer: ${text.slice(0, 200)}`);
       }
       // Every question asks for JSON: no braces, no answer yet.
       if (!/\{[\s\S]*\}/.test(text)) continue;

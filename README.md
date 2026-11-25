@@ -50,6 +50,19 @@ or the agent was stopped in between) — and then goes on to the next. If the fi
 folder (a path too long, a full disk), they are still on romva.space and the
 work carries on.
 
+## DeepSeek first
+
+With **Settings → Ask DeepSeek first** on (the default), each Resume is first
+asked of DeepSeek's free website (chat.deepseek.com) with the same prompt, to be
+answered in JSON. The chosen AI then gets the prompt together with that draft and
+writes the final Resume. Cover letters are not drafted.
+
+Sign in once with **Sign in to DeepSeek…**. If DeepSeek cannot answer (signed
+out, busy, its daily limit, no valid JSON after a second try), the log says so,
+the Resume is made without a draft, and DeepSeek is left alone for 10 minutes.
+DeepSeek has no temporary chat, so these chats stay in its history, with the
+candidate's details in them.
+
 ## Needs
 
 - Windows 10/11, **Node.js 20+** (https://nodejs.org), **Google Chrome** (or Edge)
@@ -161,6 +174,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Purge   # deletes them
 | `workerName` | `agent · <computer>` | shown on romva.space |
 | `pollSeconds` | `20` | how often to look for new applications |
 | `ai` | `chatgpt` | `chatgpt`, `claude` or `gemini` (the window's **AI**) |
+| `deepseekFirst` | `true` | ask DeepSeek for a Resume draft first (the window's **Ask DeepSeek first**) |
 | `chrome.path` | first Chrome/Edge found | |
 | `chrome.profileDir` | `%LOCALAPPDATA%\RomvaResumeAgent\chrome` | the AI websites' sign-ins live here |
 | `chrome.debugPort` | `9334` | |

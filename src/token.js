@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createApi } from './api.js';
 import { createChat } from './chat.js';
 import { loadConfig, saveConfig, updateConfig } from './config.js';
-import { SITES, siteFor } from './sites.js';
+import { DEEPSEEK, SITES, siteFor } from './sites.js';
 
 /**
  * For the GUI (gui/RomvaAgent.exe). Never prints the token itself.
@@ -18,7 +18,10 @@ import { SITES, siteFor } from './sites.js';
  *   node src/token.js ai       ← nothing: → {"ok":true,"ai":"chatgpt","sites":[{"id","name","host"}…]}
  *                              ← a site id on stdin (chatgpt | claude | gemini): saved
  *                              → {"ok":true,"ai":"claude",…} (the agent uses it from its next start)
+ *   node src/token.js deepseek ← nothing: → {"ok":true,"on":true} (is DeepSeek asked for a draft first)
+ *                              ← "on" or "off" on stdin: saved
  *   node src/token.js open     → the agent's Chrome window on the AI site, in front (to sign in there)
+ *                              ← "deepseek" on stdin: on chat.deepseek.com instead
  *                              → {"ok":true,"site":"Claude"} or {"ok":false,"error":"…"}
  */
 
@@ -95,9 +98,18 @@ async function ai() {
   print(aiStatus(wanted));
 }
 
+async function deepseek() {
+  const wanted = (await readStdin()).toLowerCase();
+  if (!wanted) return print({ ok: true, on: loadConfig().deepseekFirst !== false });
+  if (wanted !== 'on' && wanted !== 'off') return print({ ok: false, error: 'Use: on or off.' });
+  updateConfig({ deepseekFirst: wanted === 'on' });
+  print({ ok: true, on: wanted === 'on' });
+}
+
 async function open() {
+  const wanted = (await readStdin()).toLowerCase();
   const config = loadConfig();
-  const site = siteFor(config.ai);
+  const site = wanted === DEEPSEEK.id ? DEEPSEEK : siteFor(config.ai);
   const chat = createChat(config.chrome, site);
   try {
     await chat.open();
@@ -107,7 +119,7 @@ async function open() {
   }
 }
 
-const commands = { set, status, folder, ai, open };
+const commands = { set, status, folder, ai, deepseek, open };
 const command = commands[process.argv[2]];
 (command ? command() : Promise.reject(new Error(`Use: ${Object.keys(commands).join(' | ')}`)))
   // No process.exit(): right after a fetch it can trip a Node bug on Windows. Node ends by itself.

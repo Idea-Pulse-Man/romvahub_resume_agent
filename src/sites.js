@@ -124,6 +124,36 @@ export const SITES = {
   },
 };
 
+/**
+ * DeepSeek's free website: not one of the AI choices. It writes the first
+ * draft of a Resume, as JSON, which the chosen AI then works from (config.json
+ * "deepseekFirst", deepseek-draft.js).
+ *
+ * Its buttons carry no labels, so there is no "finished" sign: a whole JSON
+ * reply unchanged for `jsonDoneMs` is taken. Enter sends.
+ */
+export const DEEPSEEK = {
+  id: 'deepseek',
+  name: 'DeepSeek',
+  host: 'chat.deepseek.com',
+  home: 'https://chat.deepseek.com/',
+  isSite: /^https:\/\/chat\.deepseek\.com\//,
+  signInPages: /^https:\/\/(chat\.deepseek\.com\/sign_(in|up)|accounts\.google\.com)/,
+  newChatUrl() {
+    return 'https://chat.deepseek.com/';
+  },
+  composer: 'textarea#chat-input, textarea[placeholder*="DeepSeek" i], textarea[name="search"], textarea',
+  send: null,
+  /** Switches under the message box, turned on for a Resume. */
+  toggles: ['DeepThink', 'Search'],
+  session: `(() => (location.pathname.startsWith('/sign_') ? 'out' : 'unknown'))()`,
+  freshChat: `(() => !document.querySelector('.ds-markdown'))()`,
+  replySelector: '.ds-markdown',
+  jsonDoneMs: 15_000,
+  /** Said instead of an answer: no use waiting on. */
+  refusal: 'server is busy|servers are busy|usage (has )?(reached|hit).{0,20}limit|reached.{0,30}limit|try again later',
+};
+
 export const DEFAULT_SITE = 'chatgpt';
 
 /** The site config.json "ai" names (ChatGPT when unset or unknown). */
