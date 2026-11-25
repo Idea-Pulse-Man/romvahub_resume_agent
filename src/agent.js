@@ -294,7 +294,9 @@ async function main() {
     process.exit(0);
   }
 
-  const api = createApi(config.apiUrl, config.workerName, config.token);
+  const api = createApi(config.apiUrl, config.workerName, config.token, {
+    renewable: process.env.ROMVA_TOKEN_STDIN === '1',
+  });
   // The romva hub desktop app: a renewed sign-in arrives as a "token <value>" line.
   if (process.env.ROMVA_TOKEN_STDIN === '1') {
     let pending = '';

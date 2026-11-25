@@ -43,12 +43,34 @@ export function isTemporary(error) {
   return error instanceof ApiError && (error.status === 0 || error.hosting || (error.status >= 500 && error.status !== 502));
 }
 
-/** `worker`: this computer's name, sent with every step so romva.space knows the hold is still ours. */
-export function createApi(baseUrl, worker, initialToken) {
+/** How long a refused sign-in waits for the desktop app's next one: it renews every 5 minutes. */
+const TOKEN_WAIT_MS = 6 * 60_000;
+
+/**
+ * `worker`: this computer's name, sent with every step so romva.space knows the hold is still ours.
+ * `renewable`: the token comes from the romva hub desktop app, which sends a new one as it renews.
+ */
+export function createApi(baseUrl, worker, initialToken, { renewable = false } = {}) {
   const base = baseUrl.replace(/\/+$/, '');
   // The romva hub desktop app runs the agent with a short-lived sign-in and
   // sends a fresh one on stdin as it renews (agent.js, ROMVA_TOKEN_STDIN).
   let token = initialToken;
+  let renewal = null; // the wait for the next token, shared by every call refused meanwhile
+  let tokenArrived = null;
+
+  function nextToken() {
+    renewal ??= new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        renewal = null;
+        tokenArrived = null;
+        resolve();
+      };
+      const timer = setTimeout(finish, TOKEN_WAIT_MS);
+      tokenArrived = finish;
+    });
+    return renewal;
+  }
 
   /** `resend`: an answer from the AI site (its work is lost if not handed in) — sent again while romva.space cannot be reached. */
   async function call(path, { method = 'GET', body, resend = false } = {}) {
@@ -103,16 +125,33 @@ export function createApi(baseUrl, worker, initialToken) {
     return data;
   }
 
-  /** A token never expires, so there is no sign-in to renew: every call is just the call. */
-  const authed = call;
+  /**
+   * A Romva token never expires: every call is just the call. The desktop
+   * app's sign-in does, and one that ran out before the next arrived refused a
+   * finished Resume, which was thrown away and counted as failed (2026-11-25,
+   * Brigit): so a refused call waits for the next sign-in and is sent once more.
+   */
+  async function authed(path, options) {
+    try {
+      return await call(path, options);
+    } catch (error) {
+      if (!renewable || !(error instanceof ApiError) || error.status !== 401) throw error;
+      const refused = token;
+      if (!renewal) log.warn('romva.space refused the sign-in; waiting for the desktop app to renew it', { error: error.message });
+      await nextToken();
+      if (token === refused) throw error;
+      return call(path, options);
+    }
+  }
 
   return {
     /** A renewed sign-in from the desktop app. */
     setToken: (next) => {
       token = next;
+      tokenArrived?.();
     },
-    /** { token: { label, profile: { id, name } } }: the Profile this token acts as. */
-    me: () => authed('/api/auth/me'),
+    /** { token: { label, profile: { id, name } } }: the Profile this token acts as. At start: a refusal is not waited out. */
+    me: () => call('/api/auth/me'),
     /** The next application; `letterOnly` jobs (a stored Resume missing its cover letter) included. */
     claim: () => authed('/api/auto-make/claim', { method: 'POST', body: { worker, letterOnlyJobs: true } }),
     /** romva.space's look at a Resume answer: { ok, problems, retryMessage? }. Stores and counts nothing. */
