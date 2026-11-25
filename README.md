@@ -43,7 +43,9 @@ Redo buttons under the reply), not when the page stops changing: a thinking
 model thinks and searches for long stretches with nothing changing on the
 page. Only the reply is read, never the question.
 
-Applications are taken in the order of the Applications list (No 1, 2, 3…).
+Applications are taken in the order chosen with ▲ / ▼ next to **Start resume**
+on romva.space: ▲ from No 1 up (1, 2, 3…), ▼ from the highest number down. Going
+down, applications scraped meanwhile wait until the older ones are done.
 For each one the agent makes whatever is missing — the Resume and cover
 letter, or just the cover letter if the Resume is already there (it failed,
 or the agent was stopped in between) — and then goes on to the next. If the files cannot be written to the save
