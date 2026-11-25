@@ -1,4 +1,16 @@
 import { TOKEN_HELP } from './config.js';
+import { log } from './log.js';
+
+/**
+ * No connection was made, so the request never left this computer: it is
+ * safe to send again. (Seen 2026-11-24 on the new VPS: romva.space
+ * unreachable for a few minutes at a time, each time just as a finished
+ * Resume was being handed in — and ChatGPT's work was thrown away.)
+ */
+const NOT_SENT = new Set(['UND_ERR_CONNECT_TIMEOUT', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH']);
+/** Waits before sending an answer again: about 3 minutes in all, then it is handed back as before. */
+const RESEND_WAITS_MS = [10_000, 20_000, 40_000, 60_000];
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * romva.space's API, with the Romva token from setup (config.json "token").
@@ -38,24 +50,34 @@ export function createApi(baseUrl, worker, initialToken) {
   // sends a fresh one on stdin as it renews (agent.js, ROMVA_TOKEN_STDIN).
   let token = initialToken;
 
-  async function call(path, { method = 'GET', body } = {}) {
+  /** `resend`: an answer from the AI site (its work is lost if not handed in) — sent again while romva.space cannot be reached. */
+  async function call(path, { method = 'GET', body, resend = false } = {}) {
     if (!token) throw new ApiError(401, `No Romva token. ${TOKEN_HELP}`);
     let response;
     let text;
-    try {
-      response = await fetch(`${base}${path}`, {
-        method,
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(180_000),
-      });
-      text = await response.text();
-    } catch (error) {
-      const reason = error?.cause?.message || error?.message || String(error);
-      throw new ApiError(0, `Could not reach romva.space: ${reason}`);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        response = await fetch(`${base}${path}`, {
+          method,
+          headers: {
+            authorization: `Bearer ${token}`,
+            ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+          },
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(180_000),
+        });
+        text = await response.text();
+        break;
+      } catch (error) {
+        const reason = error?.cause?.message || error?.message || String(error);
+        if (resend && NOT_SENT.has(error?.cause?.code) && attempt < RESEND_WAITS_MS.length) {
+          const waitMs = RESEND_WAITS_MS[attempt];
+          log.warn(`Could not reach romva.space; sending the answer again in ${waitMs / 1000} s`, { error: reason });
+          await sleep(waitMs);
+          continue;
+        }
+        throw new ApiError(0, `Could not reach romva.space: ${reason}`);
+      }
     }
     let data = null;
     try {
@@ -95,11 +117,11 @@ export function createApi(baseUrl, worker, initialToken) {
     claim: () => authed('/api/auto-make/claim', { method: 'POST', body: { worker, letterOnlyJobs: true } }),
     /** romva.space's look at a Resume answer: { ok, problems, retryMessage? }. Stores and counts nothing. */
     checkResume: (bidId, answer) =>
-      authed(`/api/auto-make/jobs/${bidId}/check-resume`, { method: 'POST', body: { answer, worker } }),
+      authed(`/api/auto-make/jobs/${bidId}/check-resume`, { method: 'POST', body: { answer, worker }, resend: true }),
     submitResume: (bidId, answer) =>
-      authed(`/api/auto-make/jobs/${bidId}/resume`, { method: 'POST', body: { answer, worker } }),
+      authed(`/api/auto-make/jobs/${bidId}/resume`, { method: 'POST', body: { answer, worker }, resend: true }),
     submitCoverLetter: (bidId, answer) =>
-      authed(`/api/auto-make/jobs/${bidId}/cover-letter`, { method: 'POST', body: { answer, worker } }),
+      authed(`/api/auto-make/jobs/${bidId}/cover-letter`, { method: 'POST', body: { answer, worker }, resend: true }),
     /** Still here (and, with `bidId`, still on it — 409 when the hold is gone). */
     heartbeat: (bidId, waitingReason) =>
       authed('/api/auto-make/heartbeat', {
