@@ -33,7 +33,9 @@ proficiency)"). So each Resume request says the answer goes into the Resume
 word for word, and a draft answer is asked for once more with its placeholders
 quoted (the log says so; one still left after that is noted in the log).
 Every answer asked for again is kept in `%APPDATA%\RomvaResumeAgent\answers\`
-(the newest 30), to see what ChatGPT wrote.
+(the newest 30 files), to see what ChatGPT wrote. So is what the page showed
+when an answer never finished ("had not finished answering after 8 minutes"):
+`…_unfinished.txt` (the reply, buttons and end of the page) and `…_unfinished.png`.
 
 An answer is taken when the site shows it finished (the Copy / Read aloud /
 Redo buttons under the reply), not when the page stops changing: a thinking

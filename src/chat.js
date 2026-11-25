@@ -176,6 +176,15 @@ const IN_PAGE = {
       && !/^copy (message|code|prompt)\\b/i.test(label(b)));
     return { pres, tail, streaming, finished, reply: Boolean(anchor) };
   })()`,
+  /** What the page shows, for a chat whose answer never came (kept in answers\ by agent.js). */
+  state: (site, marker) => `(() => {
+    const answer = ${IN_PAGE.answer(site, marker)};
+    const buttons = Array.from(document.querySelectorAll('button'))
+      .map((b) => (b.getAttribute('aria-label') || b.getAttribute('data-testid') || b.innerText || '').trim().slice(0, 60))
+      .filter(Boolean);
+    const body = document.body.innerText || '';
+    return { url: location.href, ...answer, buttons: buttons.slice(-40), pageEnd: body.slice(-4000) };
+  })()`,
   click: (selector) => `(() => {
     const button = Array.from(document.querySelectorAll(${JSON.stringify(selector)}))
       .find((b) => b.offsetParent !== null && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
@@ -501,7 +510,14 @@ export function createChat(settings, site) {
         return text;
       }
     }
-    throw new Error(`${site.name} had not finished answering after ${settings.answerTimeoutMinutes} minutes.`);
+    const error = new Error(`${site.name} had not finished answering after ${settings.answerTimeoutMinutes} minutes.`);
+    // Still thinking, an error box, a usage limit, or an answer not recognised as one: the page says which.
+    error.seen = {
+      state: await bounded(page.evaluate(IN_PAGE.state(site, marker)), 15_000, 'Reading the page')
+        .catch((failed) => ({ error: failed.message })),
+      screenshot: await bounded(page.screenshot({ type: 'png' }), 15_000, 'Taking a screenshot').catch(() => undefined),
+    };
+    throw error;
   }
 
   /** One chat at a time: the Resume, then its cover letter. */

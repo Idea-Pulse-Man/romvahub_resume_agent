@@ -188,15 +188,19 @@ async function makeLetter(api, chat, config, job, message) {
  * A draft for the candidate to finish ("[Confirm official job title]", "by
  * X%") is asked for again the same way: see draft-text.js.
  */
-/** Where answers that were asked for again are kept, to see what ChatGPT wrote (the newest 30). */
+/**
+ * Where answers that were asked for again are kept, to see what ChatGPT wrote,
+ * and what the page showed when an answer never finished (the newest 30 files).
+ */
 const ANSWERS_DIR = path.join(DATA_DIR, 'answers');
 
-function keepAnswer(job, label, text) {
+/** `text`: a string, or a Buffer with `extension` (a screenshot). */
+function keepAnswer(job, label, text, extension = 'txt') {
   try {
     mkdirSync(ANSWERS_DIR, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const company = String(job.company ?? 'job').replace(/[^\w.-]+/g, '_').slice(0, 40);
-    const file = path.join(ANSWERS_DIR, `${stamp}_${company}_${label}.txt`);
+    const file = path.join(ANSWERS_DIR, `${stamp}_${company}_${label}.${extension}`);
     writeFileSync(file, text);
     for (const old of readdirSync(ANSWERS_DIR).sort().reverse().slice(30)) unlinkSync(path.join(ANSWERS_DIR, old));
     return file;
@@ -417,7 +421,14 @@ async function main() {
           // romva.space already counted a bad Resume answer (400/502) when it
           // refused it; everything else (a failed cover letter included) is counted here.
           const counted = error instanceof ApiError && (error.status === 400 || error.status === 502);
-          log.error(`Failed: ${job.company}`, { error: error.message });
+          // An answer that never came: what the page showed, to see why.
+          const seen = error.seen
+            ? {
+                page: keepAnswer(job, 'unfinished', JSON.stringify(error.seen.state, null, 2)),
+                ...(error.seen.screenshot ? { screenshot: keepAnswer(job, 'unfinished', error.seen.screenshot, 'png') } : {}),
+              }
+            : {};
+          log.error(`Failed: ${job.company}`, { error: error.message, ...seen });
           if (!counted) await api.release(job.bidId, true, error.message).catch(() => undefined);
         }
       }
