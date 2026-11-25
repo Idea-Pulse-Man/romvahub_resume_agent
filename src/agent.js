@@ -31,6 +31,12 @@ import { log } from './log.js';
  * An application whose Resume is stored but whose cover letter failed comes
  * back later as a letter-only job (steps 4–6 only).
  *
+ * A job with `fromProfile` (its Profile's Resume prompt has `{{CANDIDATE}}`):
+ * romva.space's message already holds the Profile's own work history, the
+ * rules and the answer's shape. The agent adds nothing of its own, and asks
+ * with web search off (DeepSeek: DeepThink and Search off), since there is
+ * nothing to look up.
+ *
  * Does nothing while Auto resume is at Stop on romva.space. Waits (without
  * reloading anything) while ChatGPT is signed out. `--once`: one application,
  * then exit.
@@ -195,20 +201,29 @@ async function makeLetter(api, chat, config, job, message) {
 /** An answer asked for again, kept in answers\ (keep.js) to see what ChatGPT wrote. */
 const keepAnswer = (job, label, text) => keepFile(job.company, label, text);
 
-/** ChatGPT's answer with its skill groups named (answer-fixes.js); the groups it left unnamed, as problems. */
+/**
+ * ChatGPT's answer with its skill groups named (answer-fixes.js); the groups
+ * it left unnamed, as problems. A `fromProfile` request has its own
+ * "finished text only" rule, so FINISHED_TEXT is not added to it.
+ */
 async function askResumeChat(chat, message, options, job) {
-  const raw = await chat.ask(`${message}\n\n${FINISHED_TEXT}`, { ...options, name: job.company });
+  const request = job.fromProfile ? message : `${message}\n\n${FINISHED_TEXT}`;
+  const raw = await chat.ask(request, { ...options, name: job.company });
   const { text, unnamed } = nameSkillGroups(raw);
   if (text !== raw) log.info(`Named the skill groups ${chat.site.name} called "Skill-Group-N"`, { company: job.company });
   return { text, unnamed: unnamed.map((name) => `a skill group named "${name}" instead of its own name`) };
 }
 
 async function askForResume(api, chat, drafter, config, job) {
-  const options = { webSearch: config.chrome.resumeWebSearch !== false };
+  const fromProfile = job.fromProfile === true;
+  // A fromProfile request holds the Profile's own work history and the
+  // posting: nothing to look up on the web.
+  const options = { webSearch: !fromProfile && config.chrome.resumeWebSearch !== false };
   // As config.json has it now: the window's switch counts from the next application on.
   const useDraft = (readSavedConfig()?.deepseekFirst ?? config.deepseekFirst) !== false;
   const draft = useDraft ? await drafter(job, options) : null;
-  const first = await askResumeChat(chat, withDraft(job.resumeMessage, draft), options, job);
+  const withTheDraft = (message) => withDraft(message, draft, { fromProfile });
+  const first = await askResumeChat(chat, withTheDraft(job.resumeMessage), options, job);
   const answer = first.text;
   let check;
   try {
@@ -232,7 +247,7 @@ async function askForResume(api, chat, drafter, config, job) {
     log.warn(`Resume answer is a draft (placeholders); asking ${chat.site.name} again`, { company: job.company, drafts, answer: kept });
     retry = withDraftsPointedOut(retry, drafts);
   }
-  const second = await askResumeChat(chat, withDraft(retry, draft), options, job);
+  const second = await askResumeChat(chat, withTheDraft(retry), options, job);
   const keptSecond = keepAnswer(job, 'second', second.text);
   const left = [...draftMarks(second.text), ...second.unnamed];
   if (left.length) {

@@ -187,19 +187,23 @@ const IN_PAGE = {
     return { url: location.href, ...answer, buttons: buttons.slice(-40), pageEnd: body.slice(-4000) };
   })()`,
   /**
-   * Turns on the switch labelled `label` when the page shows it is off: 'on'
-   * (already), 'clicked', or 'unknown' (not found, or its state cannot be
-   * told: left alone rather than turned off).
+   * Sets the switch labelled `label` on or off (`on`): 'as wanted' (already),
+   * 'clicked', or 'unknown' (not found, or its state cannot be told: left
+   * alone).
    */
-  toggle: (label) => `(() => {
+  toggle: (label, on) => `(() => {
     const wanted = ${JSON.stringify(label.toLowerCase())};
+    const want = ${JSON.stringify(Boolean(on))};
     const button = Array.from(document.querySelectorAll('button, [role="button"], .ds-toggle-button'))
       .find((el) => el.offsetParent !== null && (el.innerText || '').trim().toLowerCase() === wanted);
     if (!button) return 'unknown';
     const pressed = button.getAttribute('aria-pressed');
     const name = String(button.className || '');
-    if (pressed === 'true' || name.includes('--selected')) return 'on';
-    if (pressed !== 'false' && !name.includes('toggle-button')) return 'unknown';
+    let isOn;
+    if (pressed === 'true' || name.includes('--selected')) isOn = true;
+    else if (pressed === 'false' || name.includes('toggle-button')) isOn = false;
+    else return 'unknown';
+    if (isOn === want) return 'as wanted';
     button.click();
     return 'clicked';
   })()`,
@@ -469,8 +473,12 @@ export function createChat(settings, site) {
     };
   }
 
-  /** `name`: what the chat is for (the company), in the names of the files keepPage keeps. */
-  async function askIn(page, message, { webSearch = false, name = '' } = {}) {
+  /**
+   * `name`: what the chat is for (the company), in the names of the files
+   * keepPage keeps. `switches`: { label: on } for the site's switches
+   * (DeepSeek's DeepThink, Search); left out, web search turns them all on.
+   */
+  async function askIn(page, message, { webSearch = false, switches, name = '' } = {}) {
     // Not brought to the front: a new tab is already the active one in its
     // window, and focusing the window would pull the person away from an
     // application form they are filling in.
@@ -508,11 +516,11 @@ export function createChat(settings, site) {
       log.info(site.webSearchNote);
     }
 
-    if (webSearch) {
-      for (const label of site.toggles ?? []) {
-        const state = await page.evaluate(IN_PAGE.toggle(label)).catch(() => 'unknown');
-        if (state === 'unknown') log.info(`${site.name}: could not tell whether ${label} is on; left as it is`);
-      }
+    const wanted = switches ?? (webSearch ? Object.fromEntries((site.toggles ?? []).map((label) => [label, true])) : {});
+    for (const label of site.toggles ?? []) {
+      if (!(label in wanted)) continue;
+      const state = await page.evaluate(IN_PAGE.toggle(label, wanted[label])).catch(() => 'unknown');
+      if (state === 'unknown') log.info(`${site.name}: could not tell whether ${label} is on; left as it is`);
     }
 
     const marker = `Request ${randomUUID()}`;

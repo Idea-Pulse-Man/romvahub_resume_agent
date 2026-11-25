@@ -144,7 +144,10 @@ export const DEEPSEEK = {
   },
   composer: 'textarea#chat-input, textarea[placeholder*="DeepSeek" i], textarea[name="search"], textarea',
   send: null,
-  /** Switches under the message box, turned on for a Resume. */
+  /**
+   * Switches under the message box: on for a Resume prompt that researches,
+   * off for one written from the Profile's own history (deepseek-draft.js).
+   */
   toggles: ['DeepThink', 'Search'],
   session: `(() => (location.pathname.startsWith('/sign_') ? 'out' : 'unknown'))()`,
   freshChat: `(() => !document.querySelector('.ds-markdown'))()`,
