@@ -65,22 +65,6 @@ the Resume is made without a draft, and DeepSeek is left alone for 10 minutes.
 DeepSeek has no temporary chat, so these chats stay in its history, with the
 candidate's details in them.
 
-## Short prompts from the Profile's own work history
-
-A Profile whose Resume prompt contains `{{CANDIDATE}}` (romva.space backend:
-`src/local/profile-history-prompt.ts` has a ready one) gets a much shorter
-request. romva.space puts the Profile's own jobs (title, company, place, dates),
-years of experience and education where `{{CANDIDATE}}` is, then the posting
-and the answer's JSON shape, sized to the Profile's Word template. The answer is
-small: a headline, the summary, the skill groups and the bullet points. The job
-titles, employers and places in the Resume are always the Profile's own.
-
-For such a job (`fromProfile` from romva.space) the agent adds nothing of its
-own to the request, and asks with web search off: ChatGPT without Web search,
-DeepSeek with **DeepThink and Search off**. There is nothing to look up, and
-DeepSeek's answer is then a fraction of the size, which keeps its free usage
-limit far away. Other Profiles' prompts are asked exactly as before.
-
 ## Needs
 
 - Windows 10/11, **Node.js 20+** (https://nodejs.org), **Google Chrome** (or Edge)
