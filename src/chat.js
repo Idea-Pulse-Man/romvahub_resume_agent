@@ -187,19 +187,20 @@ const IN_PAGE = {
     return { url: location.href, ...answer, buttons: buttons.slice(-40), pageEnd: body.slice(-4000) };
   })()`,
   /**
-   * Turns on the switch labelled `label` when the page shows it is off: 'on'
-   * (already), 'clicked', or 'unknown' (not found, or its state cannot be
-   * told: left alone rather than turned off).
+   * Turns the switch labelled `label` on (`on`) or off: 'done' (already so),
+   * 'clicked', or 'unknown' (not found, or its state cannot be told: left
+   * alone rather than turned the wrong way).
    */
-  toggle: (label) => `(() => {
+  toggle: (label, on = true) => `(() => {
     const wanted = ${JSON.stringify(label.toLowerCase())};
     const button = Array.from(document.querySelectorAll('button, [role="button"], .ds-toggle-button'))
       .find((el) => el.offsetParent !== null && (el.innerText || '').trim().toLowerCase() === wanted);
     if (!button) return 'unknown';
     const pressed = button.getAttribute('aria-pressed');
     const name = String(button.className || '');
-    if (pressed === 'true' || name.includes('--selected')) return 'on';
-    if (pressed !== 'false' && !name.includes('toggle-button')) return 'unknown';
+    const isOn = pressed === 'true' || name.includes('--selected');
+    if (!isOn && pressed !== 'false' && !name.includes('toggle-button')) return 'unknown';
+    if (isOn === ${on ? 'true' : 'false'}) return 'done';
     button.click();
     return 'clicked';
   })()`,
@@ -260,24 +261,32 @@ const IN_PAGE = {
       if (!target) {
         problems.push('there is no ' + ${JSON.stringify(mode)} + ' mode' + (modes().length ? '' : ' in this chat (a temporary chat has none)'));
       } else {
-        press(target);
-        // The model menu is redrawn for the mode.
-        if (await until(() => modeOn().toLowerCase() === wanted.mode, 4000)) await sleep(800);
+        // Pressed again if chatgpt.com had not finished loading. The model menu is then redrawn for the mode.
+        for (let i = 0; i < 4 && modeOn().toLowerCase() !== wanted.mode; i += 1) {
+          const button = modes().find((b) => text(b).toLowerCase() === wanted.mode);
+          if (button) press(button);
+          await until(() => modeOn().toLowerCase() === wanted.mode, 1500);
+        }
+        if (modeOn().toLowerCase() === wanted.mode) await sleep(800);
         else problems.push('it did not switch to ' + ${JSON.stringify(mode)} + ' mode');
       }
     }
 
-    if (!trigger()) return { mode: modeOn(), problems: [...problems, 'its model menu was not found'] };
+    // The menu's button may show a moment after the message box.
+    if (!(await until(trigger, 10000))) return { mode: modeOn(), problems: [...problems, 'its model menu was not found'] };
     const found = () => {
       const button = trigger();
       return button && button.id
         ? document.querySelector('[role="menu"][data-state="open"][aria-labelledby="' + CSS.escape(button.id) + '"]')
         : null;
     };
+    // Pressed before chatgpt.com has finished loading, the button does nothing: pressed again.
     const open = async () => {
-      if (found()) return found();
-      press(trigger());
-      return until(found);
+      for (let i = 0; i < 6 && !found(); i += 1) {
+        if (trigger()) press(trigger());
+        if (await until(found, 1500)) break;
+      }
+      return found();
     };
     const name = (radio) => text(radio.querySelector('span') || radio).split('\\n')[0].trim();
     const radios = () => Array.from(found()?.querySelectorAll('[role="menuitemradio"]') ?? []);
@@ -366,8 +375,12 @@ const IN_PAGE = {
   })()`,
 };
 
-/** `settings`: config.json "chrome". `site`: one of sites.js SITES. */
-export function createChat(settings, site) {
+/**
+ * `settings`: config.json "chrome". `site`: one of sites.js SITES. `choice`:
+ * config.json models[site.id] — the site's own choices, made in every chat
+ * (ChatGPT: mode, model, effort; DeepSeek: deepThink, search).
+ */
+export function createChat(settings, site, choice = {}) {
   const browserPath = settings.path || BROWSER_CANDIDATES.find((candidate) => existsSync(candidate));
   const home = site.id === 'chatgpt' && settings.url ? settings.url : site.home;
   const isSite = (page) => site.isSite.test(page.url());
@@ -599,18 +612,18 @@ export function createChat(settings, site) {
   let modelSaid = '';
 
   /** Chat or Work (config.json chrome.mode), where the site has the choice (ChatGPT). */
-  const workMode = Boolean(site.modeGroup) && String(settings.mode ?? '').trim().toLowerCase() === 'work';
+  const workMode = Boolean(site.modeGroup) && String(choice.mode ?? '').trim().toLowerCase() === 'work';
 
   /**
-   * ChatGPT's mode, model and thinking effort (config.json chrome.mode,
-   * chrome.model, chrome.effort), chosen in its message box in each new chat:
+   * ChatGPT's mode, model and thinking effort (config.json models.chatgpt:
+   * mode, model, effort), chosen in its message box in each new chat:
    * chatgpt.com puts a new chat back on Chat and its default model. What
    * cannot be chosen (the menu changed, the model is gone or at its usage
    * limit) is left as it is and the chat goes on; the log says so once for
    * each reason.
    */
   async function chooseModel(page) {
-    const wanted = { mode: settings.mode ?? '', model: settings.model ?? '', effort: settings.effort ?? '' };
+    const wanted = { mode: choice.mode ?? '', model: choice.model ?? '', effort: choice.effort ?? '' };
     if (!site.modelPicker || (!wanted.mode && !wanted.model && !wanted.effort)) return;
     const result = await bounded(page.evaluate(IN_PAGE.pickModel(site, wanted)), 45_000, 'Choosing the model')
       .catch((error) => ({ problems: [error.message] }));
@@ -705,11 +718,13 @@ export function createChat(settings, site) {
       log.info(site.webSearchNote);
     }
 
-    if (webSearch) {
-      for (const label of site.toggles ?? []) {
-        const state = await page.evaluate(IN_PAGE.toggle(label)).catch(() => 'unknown');
-        if (state === 'unknown') log.info(`${site.name}: could not tell whether ${label} is on; left as it is`);
-      }
+    // The site's switches (DeepSeek: DeepThink, Search): as chosen (models.deepseek), in
+    // every chat; not chosen, turned on for a Resume (webSearch) and left alone otherwise.
+    for (const [key, label] of Object.entries(site.toggles ?? {})) {
+      const on = typeof choice[key] === 'boolean' ? choice[key] : webSearch ? true : null;
+      if (on === null) continue;
+      const state = await page.evaluate(IN_PAGE.toggle(label, on)).catch(() => 'unknown');
+      if (state === 'unknown') log.info(`${site.name}: could not tell whether ${label} is on; left as it is`);
     }
 
     const marker = `Request ${randomUUID()}`;
@@ -913,7 +928,11 @@ export function createChat(settings, site) {
     const item = queue.shift();
     self
       .askNow(item.message, item.options)
-      .then(item.resolve, item.reject)
+      .then(item.resolve, (error) => {
+        // Which AI could not be used: the agent waits for that one (agent.js).
+        if (error instanceof ChatUnavailable) error.siteId ??= site.id;
+        item.reject(error);
+      })
       .finally(() => {
         busy = false;
         pump();

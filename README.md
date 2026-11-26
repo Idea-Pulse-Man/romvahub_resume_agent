@@ -31,8 +31,8 @@ In each ChatGPT chat the agent chooses ChatGPT's **mode** (Chat or Work), the
 **model** and the thinking **effort** (Low, Medium, High) in the message box —
 chatgpt.com puts every new chat back on Chat and its default model. The romva
 hub desktop app sets them on its Resume Maker page (default Chat · GPT-6 ·
-High); on its own, the agent takes `chrome.mode`, `chrome.model` and
-`chrome.effort` from `config.json` (`""` leaves that one alone). The log says
+High); on its own, the agent takes `models.chatgpt` (`mode`, `model`,
+`effort`) from `config.json` (`""` leaves that one alone). The log says
 what was chosen (`ChatGPT: Chat · GPT-6 · High`).
 
 - The models differ between the modes (Chat: GPT-6.2, GPT-6, GPT-5.6 Sol;
@@ -69,18 +69,32 @@ or the agent was stopped in between) — and then goes on to the next. If the fi
 folder (a path too long, a full disk), they are still on romva.space and the
 work carries on.
 
-## DeepSeek first
+## One prompt or two
 
-With **Settings → Ask DeepSeek first** on (the default), each Resume is first
-asked of DeepSeek's free website (chat.deepseek.com) with the same prompt, to be
-answered in JSON. The chosen AI then gets the prompt together with that draft and
-writes the final Resume. Cover letters are not drafted.
+How each Resume is made (the romva hub desktop app: **Resume Maker → AI
+website**; on its own, `config.json`):
 
-Sign in once with **Sign in to DeepSeek…**. If DeepSeek cannot answer (signed
-out, busy, its daily limit, no valid JSON after a second try), the log says so,
-the Resume is made without a draft, and DeepSeek is left alone for 10 minutes.
-DeepSeek has no temporary chat, so these chats stay in its history, with the
-candidate's details in them.
+- **One prompt** (`"method": "one"`): one AI (`ai`) writes the Resume.
+- **Two prompts** (`"method": "two"`, the default): the first AI (`draftAi`,
+  DeepSeek by default) answers the same prompt in JSON, as a draft; the second
+  (`ai`, ChatGPT by default) gets the prompt with that draft and writes the
+  Resume. Any of the AIs can be first or second, the same one too.
+- The **cover letter** is one prompt, to its own AI (`letterAi`; unset: the
+  same as `ai`).
+
+The AIs: `chatgpt`, `deepseek`, `claude`, `gemini`. Each one's own choices
+are in `models`, made in every chat with it: ChatGPT's mode, model and effort
+(above); DeepSeek's **DeepThink** and **Search** switches (`{ "deepThink": true,
+"search": true }`; it has no model menu); Claude and Gemini use their default
+model for now. On its own, without `method`, the agent window's **Ask DeepSeek
+first** switch decides (on: two prompts, DeepSeek first).
+
+Sign in once to each AI used, in the agent's Chrome window. If the first AI
+cannot answer (signed out, busy, its daily limit, no valid JSON after a second
+try), the log says so, the Resume is made without a draft, and the first AI is
+left alone for 10 minutes. DeepSeek has no temporary chat, so its chats stay in
+its history, with the candidate's details in them. When the second AI or the
+cover letter's AI cannot be used, the agent pauses until that one is ready.
 
 ## Needs
 

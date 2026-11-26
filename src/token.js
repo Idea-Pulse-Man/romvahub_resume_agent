@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createApi } from './api.js';
 import { createChat } from './chat.js';
 import { loadConfig, saveConfig, updateConfig } from './config.js';
-import { DEEPSEEK, SITES, siteFor } from './sites.js';
+import { SITES, siteFor } from './sites.js';
 
 /**
  * For the GUI (gui/RomvaAgent.exe). Never prints the token itself.
@@ -21,7 +21,7 @@ import { DEEPSEEK, SITES, siteFor } from './sites.js';
  *   node src/token.js deepseek ← nothing: → {"ok":true,"on":true} (is DeepSeek asked for a draft first)
  *                              ← "on" or "off" on stdin: saved
  *   node src/token.js open     → the agent's Chrome window on the AI site, in front (to sign in there)
- *                              ← "deepseek" on stdin: on chat.deepseek.com instead
+ *                              ← an AI's id on stdin ("deepseek"…): that site instead
  *                              → {"ok":true,"site":"Claude"} or {"ok":false,"error":"…"}
  */
 
@@ -109,7 +109,7 @@ async function deepseek() {
 async function open() {
   const wanted = (await readStdin()).toLowerCase();
   const config = loadConfig();
-  const site = wanted === DEEPSEEK.id ? DEEPSEEK : siteFor(config.ai);
+  const site = SITES[wanted] ?? siteFor(config.ai);
   const chat = createChat(config.chrome, site);
   try {
     await chat.open();

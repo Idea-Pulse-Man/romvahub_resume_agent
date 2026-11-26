@@ -4,9 +4,9 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ApiError, createApi, isTemporary } from './api.js';
 import { ChatUnavailable, createChat } from './chat.js';
-import { DEEPSEEK, siteFor } from './sites.js';
+import { siteFor } from './sites.js';
 import { createDrafter, withDraft } from './deepseek-draft.js';
-import { DATA_DIR, TOKEN_HELP, loadConfig, readSavedConfig } from './config.js';
+import { DATA_DIR, TOKEN_HELP, currentMethod, loadConfig, readSavedConfig } from './config.js';
 import { nameSkillGroups } from './answer-fixes.js';
 import { FINISHED_TEXT, draftMarks, withDraftsPointedOut } from './draft-text.js';
 import { keepFile } from './keep.js';
@@ -15,16 +15,17 @@ import { log } from './log.js';
 /**
  * Romva Resume Agent: makes the Resume and cover letter for each new Draft
  * application on romva.space, in the background, with an AI website signed
- * in on this computer: ChatGPT, Claude or Gemini (config.json "ai", sites.js).
+ * in on this computer: ChatGPT, DeepSeek, Claude or Gemini (sites.js), as
+ * config.json chooses: "method", "ai", "draftAi", "letterAi", "models".
  * "ChatGPT" below stands for whichever it is.
  *
  *   1. ask romva.space for the next application (it hands out each one to one
  *      worker only — this agent, the Chrome extension, or the local API)
- *   2. DeepSeek, new chat (config.json "deepseekFirst"): the same prompt → a
- *      JSON draft; then ChatGPT, new chat: the Profile's Resume prompt + the
- *      posting + that draft → JSON
+ *   2. one prompt: `ai`, new chat: the Profile's Resume prompt + the posting →
+ *      JSON. Two prompts: `draftAi` first (the same prompt → a JSON draft),
+ *      then `ai` with the prompt + that draft → JSON
  *   3. romva.space builds the Resume (Word template + PDF) and stores it
- *   4. ChatGPT, new chat: the cover letter prompt → JSON
+ *   4. `letterAi`, new chat: the cover letter prompt → JSON
  *   5. romva.space builds and stores the cover letter
  *   6. the five files are saved to <saveDir>\<Profile>\<Company_Role>\
  *
@@ -206,7 +207,7 @@ async function askResumeChat(chat, message, options, job) {
 async function askForResume(api, chat, drafter, config, job) {
   const options = { webSearch: config.chrome.resumeWebSearch !== false };
   // As config.json has it now: the window's switch counts from the next application on.
-  const useDraft = (readSavedConfig()?.deepseekFirst ?? config.deepseekFirst) !== false;
+  const useDraft = currentMethod() === 'two';
   const draft = useDraft ? await drafter(job, options) : null;
   const first = await askResumeChat(chat, withDraft(job.resumeMessage, draft), options, job);
   const answer = first.text;
@@ -241,19 +242,20 @@ async function askForResume(api, chat, drafter, config, job) {
   return second.text;
 }
 
-async function makeOne(api, chat, drafter, config, job) {
+/** `chats`: { resume, draft, letter } (createChat); `drafter`: the first of two prompts. */
+async function makeOne(api, chats, drafter, config, job) {
   const stopHolding = keepHolding(api, job);
   try {
     if (job.letterOnly) {
       log.info(`Making the cover letter for #${job.number ?? '?'} ${job.company} — ${job.role}`);
-      await makeLetter(api, chat, config, job, job.coverLetterMessage);
+      await makeLetter(api, chats.letter, config, job, job.coverLetterMessage);
       return;
     }
     log.info(`Making #${job.number ?? '?'} ${job.company} — ${job.role}`);
-    const resumeAnswer = await askForResume(api, chat, drafter, config, job);
+    const resumeAnswer = await askForResume(api, chats.resume, drafter, config, job);
     const resume = await api.submitResume(job.bidId, resumeAnswer);
     await saveQuietly(config, job, resume.files, 'Resume');
-    await makeLetter(api, chat, config, job, resume.coverLetterMessage);
+    await makeLetter(api, chats.letter, config, job, resume.coverLetterMessage);
   } finally {
     stopHolding();
   }
@@ -311,14 +313,29 @@ async function main() {
       }
     });
   }
-  const site = siteFor(config.ai);
-  const chat = createChat(config.chrome, site);
-  const drafter = createDrafter(createChat(config.chrome, DEEPSEEK));
+  // One chat per AI website, with that site's own choices (config.json "models"); the same AI in two roles shares it.
+  const byId = new Map();
+  const chatFor = (id) => {
+    const site = siteFor(id);
+    if (!byId.has(site.id)) byId.set(site.id, createChat(config.chrome, site, config.models[site.id] ?? {}));
+    return byId.get(site.id);
+  };
+  const chats = { resume: chatFor(config.ai), draft: chatFor(config.draftAi), letter: chatFor(config.letterAi) };
+  const drafter = createDrafter(chats.draft);
+  const choices = (chat) => {
+    const choice = config.models[chat.site.id] ?? {};
+    const said = Object.entries(choice)
+      .filter(([, value]) => value !== '' && value !== undefined && value !== null)
+      .map(([key, value]) => (typeof value === 'boolean' ? `${key} ${value ? 'on' : 'off'}` : value));
+    return said.length ? `${chat.site.name} (${said.join(' · ')})` : chat.site.name;
+  };
   const me = await whoAmI(api);
   log.info(`Romva Resume Agent started`, {
     profile: me?.token?.profile?.name,
-    ai: site.name,
-    deepseekFirst: config.deepseekFirst !== false,
+    resume: config.method === 'two'
+      ? `two prompts: ${choices(chats.draft)} → ${choices(chats.resume)}`
+      : `one prompt: ${choices(chats.resume)}`,
+    coverLetter: choices(chats.letter),
     tokenExpires: me?.token?.expiresAt?.slice(0, 10) ?? 'never',
     worker: config.workerName,
     saveDir: config.saveDir,
@@ -339,7 +356,8 @@ async function main() {
     })
     .catch((error) => log.warn('Could not hand back the previous run\'s applications', { error: error.message }));
 
-  let waitingForChat = false;
+  /** The chat of the AI that could not be used (signed out…): waited for before the next application. */
+  let waitingForChat = null;
   let stoppedLogged = false;
   let checkedInAt = 0;
   // Paused for ChatGPT: not before `resumeAfter`. A pause that comes back
@@ -353,9 +371,9 @@ async function main() {
 
   while (true) {
     try {
-      // Signed out of ChatGPT last time: look at the window (no reload) until it is back.
+      // Signed out of an AI last time: look at its window (no reload) until it is back.
       if (waitingForChat) {
-        if (Date.now() < resumeAfter || !(await chat.ready())) {
+        if (Date.now() < resumeAfter || !(await waitingForChat.ready())) {
           // Still check in, so romva.space shows this computer as up (and why it waits).
           if (Date.now() - checkedInAt >= HEARTBEAT_MS) {
             checkedInAt = Date.now();
@@ -364,9 +382,9 @@ async function main() {
           await sleep(config.pollSeconds * 1000);
           continue;
         }
-        waitingForChat = false;
+        log.info(`${waitingForChat.site.name} is ready again`);
+        waitingForChat = null;
         resumedAt = Date.now();
-        log.info(`${site.name} is ready again`);
       }
 
       const { enabled, job } = await api.claim();
@@ -391,14 +409,14 @@ async function main() {
       idleWaitMs = config.pollSeconds * 1000;
 
       try {
-        await makeOne(api, chat, drafter, config, job);
+        await makeOne(api, chats, drafter, config, job);
       } catch (error) {
         if (error instanceof ChatUnavailable) {
           pauses = resumedAt && Date.now() - resumedAt < 10 * 60_000 ? pauses + 1 : 1;
           const holdMs = Math.min(10 * 60_000, 30_000 * 2 ** (pauses - 1));
           resumeAfter = Date.now() + holdMs;
           log.warn(`Paused: ${error.message} Trying again in ${Math.round(holdMs / 1000)} s at the earliest.`);
-          waitingForChat = true;
+          waitingForChat = byId.get(error.siteId) ?? chats.resume;
           await api.release(job.bidId, false, error.message).catch(() => undefined);
         } else if (error instanceof ApiError && error.status === 409) {
           // Our hold ran out and the application went to another worker (or was
