@@ -1,12 +1,14 @@
 import { stdin, stdout } from 'node:process';
 import readline from 'node:readline/promises';
 import { createApi } from './api.js';
-import { createChatGpt } from './chatgpt.js';
+import { createChat } from './chat.js';
 import { CONFIG_FILE, loadConfig, saveConfig } from './config.js';
+import { siteFor } from './sites.js';
 
 /**
  * One-time setup: the Romva token (from the Super Admin, romva.space → Tokens),
- * the save folder, and ChatGPT. Run again any time to change them.
+ * the save folder, and the AI website's sign-in (config.json "ai"). Run again
+ * any time to change them.
  */
 
 async function askHidden(question) {
@@ -16,19 +18,20 @@ async function askHidden(question) {
     stdin.setRawMode?.(true);
     stdin.resume();
     stdin.setEncoding('utf8');
-    const onData = (char) => {
-      if (char === '\r' || char === '\n' || char === '\u0004') {
-        stdin.setRawMode?.(false);
-        stdin.pause();
-        stdin.off('data', onData);
-        stdout.write('\n');
-        resolve(value);
-      } else if (char === '\u0003') {
-        process.exit(1);
-      } else if (char === '\u0008' || char === '\u007f') {
-        value = value.slice(0, -1);
-      } else {
-        value += char;
+    // A paste arrives as one chunk (maybe ending in Enter): look at each character.
+    const onData = (chunk) => {
+      for (const char of chunk) {
+        if (char === '\r' || char === '\n' || char === '\u0004') {
+          stdin.setRawMode?.(false);
+          stdin.pause();
+          stdin.off('data', onData);
+          stdout.write('\n');
+          resolve(value);
+          return;
+        }
+        if (char === '\u0003') process.exit(1);
+        if (char === '\u0008' || char === '\u007f') value = value.slice(0, -1);
+        else value += char;
       }
     };
     stdin.on('data', onData);
@@ -59,21 +62,22 @@ async function main() {
   saveConfig(config);
   console.log(`Saved ${CONFIG_FILE}.`);
 
-  console.log('\nOpening the agent\'s Chrome window on chatgpt.com.');
-  console.log('Sign in to ChatGPT there once (the window remembers it), then come back here.');
-  const chatgpt = createChatGpt(config.chrome);
-  await chatgpt.open();
+  const site = siteFor(config.ai);
+  console.log(`\nOpening the agent's Chrome window on ${site.host}.`);
+  console.log(`Sign in to ${site.name} there once (the window remembers it), then come back here.`);
+  const chat = createChat(config.chrome, site);
+  await chat.open();
   for (let i = 0; i < 120; i += 1) {
-    if (await chatgpt.ready()) {
-      console.log('ChatGPT is signed in. Setup is done.');
-      chatgpt.disconnect();
+    if (await chat.ready()) {
+      console.log(`${site.name} is signed in. Setup is done.`);
+      chat.disconnect();
       return;
     }
-    if (i === 0) console.log('Waiting for the ChatGPT sign-in… (up to 10 minutes)');
+    if (i === 0) console.log(`Waiting for the ${site.name} sign-in… (up to 10 minutes)`);
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
-  console.log('ChatGPT is not signed in yet. The agent will wait for it when it runs.');
-  chatgpt.disconnect();
+  console.log(`${site.name} is not signed in yet. The agent will wait for it when it runs.`);
+  chat.disconnect();
 }
 
 main().then(

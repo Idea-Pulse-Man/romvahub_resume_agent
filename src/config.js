@@ -20,8 +20,8 @@ export const LOG_FILE = path.join(DATA_DIR, 'agent.log');
 
 /** What to do about a missing or refused token. */
 export const TOKEN_HELP =
-  "Ask the Super Admin for your Profile's token (romva.space → Tokens), then run setup again: npm run setup " +
-  '(or put it in config.json as "token", or set ROMVA_TOKEN).';
+  "Ask the Super Admin for your Profile's token (romva.space → Tokens), then click “Change token…” in the " +
+  'Romva Resume Agent window (or run npm run setup).';
 
 export const DEFAULTS = {
   /** The romva.space site (its /api is the backend). */
@@ -34,13 +34,20 @@ export const DEFAULTS = {
   workerName: `agent · ${hostname()}`,
   /** How often to ask for the next application when idle, in seconds. */
   pollSeconds: 20,
-  /** The Chrome window the agent uses for ChatGPT. */
+  /** The AI website asked for the Resumes and cover letters: "chatgpt", "claude" or "gemini" (sites.js). */
+  ai: 'chatgpt',
+  /** Ask DeepSeek's free website for a Resume draft first, which the AI above then works from. */
+  deepseekFirst: true,
+  /** The Chrome window the agent uses for the AI website (signed in there once). */
   chrome: {
     path: '',
     profileDir: path.join(localAppData, 'RomvaResumeAgent', 'chrome'),
     debugPort: 9334,
+    /** ChatGPT's address; Claude and Gemini have theirs in sites.js. */
     url: 'https://chatgpt.com/',
     temporaryChat: true,
+    /** The Resume chats start with web search on, where the site lets the agent choose it (ChatGPT). */
+    resumeWebSearch: true,
     answerTimeoutMinutes: 8,
   },
 };
@@ -65,10 +72,23 @@ export function loadConfig() {
     ...saved,
     // ROMVA_TOKEN: a token from the environment instead (a second agent, or a test).
     token: process.env.ROMVA_TOKEN || saved.token || '',
+    // The romva hub desktop app also passes its server and AI website.
+    ...(process.env.ROMVA_API_URL ? { apiUrl: process.env.ROMVA_API_URL } : {}),
+    ...(process.env.ROMVA_AI ? { ai: process.env.ROMVA_AI } : {}),
     chrome: { ...DEFAULTS.chrome, ...(saved.chrome ?? {}) },
   };
 }
 
 export function saveConfig(config) {
   writeJson(CONFIG_FILE, config);
+}
+
+/** config.json as saved (no defaults filled in, no ROMVA_TOKEN), or null. */
+export function readSavedConfig() {
+  return readJson(CONFIG_FILE);
+}
+
+/** Changes some keys of config.json and keeps the rest as it is. */
+export function updateConfig(changes) {
+  writeJson(CONFIG_FILE, { ...(readJson(CONFIG_FILE) ?? {}), ...changes });
 }
