@@ -203,6 +203,108 @@ const IN_PAGE = {
     button.click();
     return 'clicked';
   })()`,
+  /**
+   * Chooses `model` and thinking `effort` in ChatGPT's model menu (sites.js
+   * modelPicker): { model, effort, label } as the menu then shows them, or
+   * { problem }. The menu is a Radix menu, which opens on pointerdown, not a
+   * click; and the agent's tab is in the background (never brought to the
+   * front), where puppeteer's mouse clicks hang — so the events are fired in
+   * the page. The menu shows the effort slider; its model list is a second
+   * view, switched to by the model row ("Select model"). The slider moves
+   * with the arrow keys, its status reading "High, 3 of 3.".
+   */
+  pickModel: (trigger, model, effort) => `(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const until = async (check, ms = 3000) => {
+      const end = Date.now() + ms;
+      for (;;) {
+        const value = check();
+        if (value || Date.now() > end) return value;
+        await sleep(100);
+      }
+    };
+    const press = (el) => {
+      const o = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse', isPrimary: true };
+      el.dispatchEvent(new PointerEvent('pointerdown', o));
+      el.dispatchEvent(new MouseEvent('mousedown', o));
+      el.dispatchEvent(new PointerEvent('pointerup', o));
+      el.dispatchEvent(new MouseEvent('mouseup', o));
+      el.click();
+    };
+    const key = (el, k) => {
+      el.focus();
+      for (const type of ['keydown', 'keyup']) el.dispatchEvent(new KeyboardEvent(type, { key: k, code: k, bubbles: true, cancelable: true }));
+    };
+    const wantedModel = ${JSON.stringify(model)}.trim().toLowerCase();
+    const wantedEffort = ${JSON.stringify(effort)}.trim().toLowerCase();
+    const button = document.querySelector(${JSON.stringify(trigger)});
+    if (!button) return { problem: 'its model menu was not found' };
+    const found = () => (button.id ? document.querySelector('[role="menu"][data-state="open"][aria-labelledby="' + CSS.escape(button.id) + '"]') : null);
+    const open = async () => {
+      if (found()) return found();
+      press(button);
+      return until(found);
+    };
+    const name = (radio) => ((radio.querySelector('span') || radio).innerText || '').split('\\n')[0].trim();
+    const radios = () => Array.from(found()?.querySelectorAll('[role="menuitemradio"]') ?? []);
+    const radio = () => radios().find((r) => name(r).toLowerCase() === wantedModel);
+    const selected = () => name(radios().find((r) => r.getAttribute('aria-checked') === 'true') ?? document.createElement('i'));
+    const power = () => found()?.querySelector('[aria-label="Power"]');
+    const level = () => {
+      const p = power();
+      const status = p && document.getElementById((p.getAttribute('aria-describedby') || '').split(' ')[0]);
+      return ((status || found()?.querySelector('[role="status"]'))?.innerText || '').split(',')[0].trim();
+    };
+    const close = async () => {
+      const menu = found();
+      if (!menu) return;
+      key(menu.contains(document.activeElement) ? document.activeElement : menu, 'Escape');
+      await until(() => !found(), 2000);
+    };
+    if (!(await open())) return { problem: 'its model menu did not open' };
+    try {
+      if (wantedModel) {
+        const target = radio();
+        if (!target) return { problem: 'its model menu has no ' + ${JSON.stringify(model)} + ' (it has: ' + radios().map(name).join(', ') + ')' };
+        if (target.getAttribute('aria-checked') !== 'true') {
+          if (target.closest('[inert]')) {
+            const toggle = found().querySelector('[data-model-picker-view-toggle]');
+            if (toggle) press(toggle);
+            await until(() => !radio()?.closest('[inert]'), 2000);
+          }
+          press(radio() ?? target);
+          // The menu may stay open (it did) or close on the pick: then it is opened again to look.
+          const picked = await until(() => radio()?.getAttribute('aria-checked') === 'true' || !found(), 3000);
+          if (!picked || !((await open()) && radio()?.getAttribute('aria-checked') === 'true')) {
+            const why = (radio()?.getAttribute('aria-describedby') || '').split(' ')
+              .map((id) => document.getElementById(id)?.innerText).filter(Boolean).join(', ');
+            return { problem: 'it did not take ' + ${JSON.stringify(model)} + (why ? ' (' + why + ')' : '') + '; it is on ' + (selected() || 'its default') };
+          }
+        }
+      }
+      if (wantedEffort) {
+        if (!(await open()) || !power()) return { problem: 'its model menu has no thinking effort to choose' };
+        // Right first (High is the top one), then left; each press must move the slider.
+        for (const k of ['ArrowRight', 'ArrowLeft']) {
+          for (let i = 0; i < 8 && level().toLowerCase() !== wantedEffort; i += 1) {
+            const before = level();
+            key(power(), k);
+            if (!(await until(() => level() !== before, 1500))) break;
+          }
+          if (level().toLowerCase() === wantedEffort) break;
+        }
+        if (level().toLowerCase() !== wantedEffort) {
+          return { problem: 'it did not take thinking effort ' + ${JSON.stringify(effort)} + '; it is on ' + (level() || 'unknown') };
+        }
+      }
+      const label = found()?.querySelector('[data-model-selection-label]')?.getAttribute('data-model-selection-label') || '';
+      const now = { model: selected(), effort: level(), label };
+      if (wantedModel && now.model.toLowerCase() !== wantedModel) return { problem: 'the model went back to ' + (now.model || 'its default') };
+      return now;
+    } finally {
+      await close();
+    }
+  })()`,
   click: (selector) => `(() => {
     const button = Array.from(document.querySelectorAll(${JSON.stringify(selector)}))
       .find((b) => b.offsetParent !== null && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
@@ -441,6 +543,36 @@ export function createChat(settings, site) {
     }
   }
 
+  const warnedModel = new Set();
+  let modelSaid = '';
+
+  /**
+   * ChatGPT's model and thinking effort (config.json chrome.model, chrome.effort),
+   * chosen in its model menu in each new chat: chatgpt.com puts a new chat back on
+   * its default. If they cannot be chosen (the menu changed, the model is gone or
+   * at its usage limit), the chat goes on with what is chosen, and the log says
+   * so once for each reason.
+   */
+  async function chooseModel(page) {
+    const model = settings.model ?? '';
+    const effort = settings.effort ?? '';
+    if (!site.modelPicker || (!model && !effort)) return;
+    const result = await bounded(page.evaluate(IN_PAGE.pickModel(site.modelPicker, model, effort)), 30_000, 'Choosing the model')
+      .catch((error) => ({ problem: error.message }));
+    if (result.problem) {
+      if (!warnedModel.has(result.problem)) {
+        warnedModel.add(result.problem);
+        log.warn(`${site.name}: could not choose ${[model, effort].filter(Boolean).join(', ')}: ${result.problem}; asking with what is chosen`);
+      }
+      return;
+    }
+    const said = `${result.model || model} · ${result.effort || effort}`;
+    if (said !== modelSaid) {
+      modelSaid = said;
+      log.info(`${site.name}: ${said}${result.label ? ` (${result.label})` : ''}`);
+    }
+  }
+
   /** The site's message box, visible — or the site could not be used. */
   async function waitForComposer(page) {
     try {
@@ -494,6 +626,8 @@ export function createChat(settings, site) {
       await page.waitForSelector(site.composer, { visible: true, timeout: 30_000 }).catch(() => undefined);
       if (!(await waitFresh(page))) throw new ChatUnavailable(`${site.name} did not open a new, empty chat.`);
     }
+
+    await chooseModel(page);
 
     let searching = false;
     if (webSearch && site.searchPill) {

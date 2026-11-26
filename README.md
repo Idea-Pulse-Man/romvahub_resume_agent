@@ -27,6 +27,14 @@ For each application it:
 Each chat is a temporary chat (Claude: incognito) in its own tab, closed when
 it is done.
 
+In each ChatGPT chat the agent chooses **GPT-6** with thinking effort **High**
+in the model menu of the message box (chatgpt.com puts every new chat back on
+its default); the log says `ChatGPT: GPT-6 · High` once. To change them, set
+`chrome.model` and `chrome.effort` in `config.json` to the names the menu
+shows (`""` leaves the menu alone). If they cannot be chosen (the model is
+gone, locked or at its usage limit, or the menu changed), the log warns once
+and the chat goes on with what is chosen.
+
 ChatGPT's thinking models (Medium, High) tend to answer with a draft for the
 candidate to finish ("[Confirm official job title]", "by X%", "(verify
 proficiency)"). So each Resume request says the answer goes into the Resume

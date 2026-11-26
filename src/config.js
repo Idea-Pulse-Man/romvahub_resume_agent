@@ -48,6 +48,9 @@ export const DEFAULTS = {
     temporaryChat: true,
     /** The Resume chats start with web search on, where the site lets the agent choose it (ChatGPT). */
     resumeWebSearch: true,
+    /** ChatGPT's model and thinking effort, as its model menu names them, chosen in each chat ('' leaves it as it is). */
+    model: 'GPT-6',
+    effort: 'High',
     answerTimeoutMinutes: 8,
   },
 };

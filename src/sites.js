@@ -13,6 +13,7 @@ const SEND = [
   'button[aria-label="Send message"]',
   'button[aria-label="Send Message"]',
   'button[aria-label="Send prompt"]',
+  'button[aria-label="Send"]',
 ].join(', ');
 
 /** A "Log in" / "Sign in" button or link on the page. */
@@ -40,6 +41,12 @@ export const SITES = {
     /** A tool chosen for the chat before it is sent, as a pill at the start of the message box ("Web search"). */
     toolPill: '[data-system-hint-type]',
     searchPill: '[data-system-hint-type="search"]',
+    /**
+     * The model menu in the message box ("Medium ⌄"): config.json chrome.model
+     * and chrome.effort are chosen there in each new chat — chatgpt.com does
+     * not keep them (a new chat is back on its default).
+     */
+    modelPicker: 'button[aria-label="Select ChatGPT model"]',
     /**
      * The sign-in as chatgpt.com's own session endpoint has it, fetched fresh:
      * 'in', 'out', or 'unknown'. Right even on a tab still loading (which shows
