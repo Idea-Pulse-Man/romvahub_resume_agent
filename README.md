@@ -27,13 +27,22 @@ For each application it:
 Each chat is a temporary chat (Claude: incognito) in its own tab, closed when
 it is done.
 
-In each ChatGPT chat the agent chooses **GPT-6** with thinking effort **High**
-in the model menu of the message box (chatgpt.com puts every new chat back on
-its default); the log says `ChatGPT: GPT-6 · High` once. To change them, set
-`chrome.model` and `chrome.effort` in `config.json` to the names the menu
-shows (`""` leaves the menu alone). If they cannot be chosen (the model is
-gone, locked or at its usage limit, or the menu changed), the log warns once
-and the chat goes on with what is chosen.
+In each ChatGPT chat the agent chooses ChatGPT's **mode** (Chat or Work), the
+**model** and the thinking **effort** (Low, Medium, High) in the message box —
+chatgpt.com puts every new chat back on Chat and its default model. The romva
+hub desktop app sets them on its Resume Maker page (default Chat · GPT-6 ·
+High); on its own, the agent takes `chrome.mode`, `chrome.model` and
+`chrome.effort` from `config.json` (`""` leaves that one alone). The log says
+what was chosen (`ChatGPT: Chat · GPT-6 · High`).
+
+- The models differ between the modes (Chat: GPT-6.2, GPT-6, GPT-5.6 Sol;
+  Work: GPT-6 Sol, GPT-6.2 Sol, GPT-6.2 Astra…): the name as the menu shows it.
+- Work chats are ordinary chats, kept in the ChatGPT history: a temporary chat
+  has no Work mode. Work mode has no Web search switch.
+- A model without the effort chosen gets the nearest level below it (Chat has
+  no Low: Instant).
+- What cannot be chosen (the model is gone, locked or at its usage limit, or
+  the menu changed) is left as it is; the log warns once and the chat goes on.
 
 ChatGPT's thinking models (Medium, High) tend to answer with a draft for the
 candidate to finish ("[Confirm official job title]", "by X%", "(verify

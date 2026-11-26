@@ -42,11 +42,14 @@ export const SITES = {
     toolPill: '[data-system-hint-type]',
     searchPill: '[data-system-hint-type="search"]',
     /**
-     * The model menu in the message box ("Medium ⌄"): config.json chrome.model
-     * and chrome.effort are chosen there in each new chat — chatgpt.com does
-     * not keep them (a new chat is back on its default).
+     * The model menu in the message box ("Medium ⌄"), and the Chat / Work
+     * switch above it (an ordinary chat only: a temporary chat has Chat
+     * only): config.json chrome.mode, chrome.model and chrome.effort are
+     * chosen there in each new chat — chatgpt.com does not keep them (a new
+     * chat is back on Chat and its default model).
      */
     modelPicker: 'button[aria-label="Select ChatGPT model"]',
+    modeGroup: '[role="group"][aria-label="Composer mode"]',
     /**
      * The sign-in as chatgpt.com's own session endpoint has it, fetched fresh:
      * 'in', 'out', or 'unknown'. Right even on a tab still loading (which shows

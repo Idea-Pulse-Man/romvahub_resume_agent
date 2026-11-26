@@ -48,9 +48,16 @@ export const DEFAULTS = {
     temporaryChat: true,
     /** The Resume chats start with web search on, where the site lets the agent choose it (ChatGPT). */
     resumeWebSearch: true,
-    /** ChatGPT's model and thinking effort, as its model menu names them, chosen in each chat ('' leaves it as it is). */
+    /**
+     * ChatGPT's mode ("chat" or "work"), model (as its model menu names it: the
+     * models differ between Chat and Work) and thinking effort ("low", "medium",
+     * "high", or a level's name in the menu), chosen in each chat; '' leaves it
+     * as it is. Work chats are ordinary chats (kept in ChatGPT's history): a
+     * temporary chat has no Work mode.
+     */
+    mode: 'chat',
     model: 'GPT-6',
-    effort: 'High',
+    effort: 'high',
     answerTimeoutMinutes: 8,
   },
 };
@@ -78,7 +85,14 @@ export function loadConfig() {
     // The romva hub desktop app also passes its server and AI website.
     ...(process.env.ROMVA_API_URL ? { apiUrl: process.env.ROMVA_API_URL } : {}),
     ...(process.env.ROMVA_AI ? { ai: process.env.ROMVA_AI } : {}),
-    chrome: { ...DEFAULTS.chrome, ...(saved.chrome ?? {}) },
+    chrome: {
+      ...DEFAULTS.chrome,
+      ...(saved.chrome ?? {}),
+      // The romva hub desktop app passes ChatGPT's mode, model and effort ('' leaves the menu alone).
+      ...(process.env.ROMVA_CHATGPT_MODE !== undefined ? { mode: process.env.ROMVA_CHATGPT_MODE } : {}),
+      ...(process.env.ROMVA_CHATGPT_MODEL !== undefined ? { model: process.env.ROMVA_CHATGPT_MODEL } : {}),
+      ...(process.env.ROMVA_CHATGPT_EFFORT !== undefined ? { effort: process.env.ROMVA_CHATGPT_EFFORT } : {}),
+    },
   };
 }
 

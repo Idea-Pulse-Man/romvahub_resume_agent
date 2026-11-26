@@ -204,16 +204,24 @@ const IN_PAGE = {
     return 'clicked';
   })()`,
   /**
-   * Chooses `model` and thinking `effort` in ChatGPT's model menu (sites.js
-   * modelPicker): { model, effort, label } as the menu then shows them, or
-   * { problem }. The menu is a Radix menu, which opens on pointerdown, not a
-   * click; and the agent's tab is in the background (never brought to the
-   * front), where puppeteer's mouse clicks hang — so the events are fired in
-   * the page. The menu shows the effort slider; its model list is a second
-   * view, switched to by the model row ("Select model"). The slider moves
-   * with the arrow keys, its status reading "High, 3 of 3.".
+   * Chooses the mode (Chat / Work), `model` and thinking `effort` in ChatGPT's
+   * message box (sites.js modeGroup, modelPicker): { mode, model, effort,
+   * effortNote, label, problems } as the page then shows them. Each step goes
+   * on when an earlier one could not be done.
+   *
+   * The menu is a Radix menu, which opens on pointerdown, not a click; and the
+   * agent's tab is in the background (never brought to the front), where
+   * puppeteer's mouse clicks hang — so the events are fired in the page. The
+   * menu shows the effort slider; its model list is a second view, switched
+   * to by the model row ("Select model"). The slider moves with the arrow
+   * keys. Each model has its own levels (GPT-6 in Chat: Instant, Medium,
+   * High; GPT-6.2 Sol in Work: Light, Medium, High…), so the effort is
+   * matched on the level's own key (the menu button's
+   * data-selected-reasoning-effort: none, low, medium, high…); a level the
+   * model does not have becomes the nearest one below it (Low in Chat →
+   * Instant).
    */
-  pickModel: (trigger, model, effort) => `(async () => {
+  pickModel: (site, { mode = '', model = '', effort = '' }) => `(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const until = async (check, ms = 3000) => {
       const end = Date.now() + ms;
@@ -235,25 +243,54 @@ const IN_PAGE = {
       el.focus();
       for (const type of ['keydown', 'keyup']) el.dispatchEvent(new KeyboardEvent(type, { key: k, code: k, bubbles: true, cancelable: true }));
     };
-    const wantedModel = ${JSON.stringify(model)}.trim().toLowerCase();
-    const wantedEffort = ${JSON.stringify(effort)}.trim().toLowerCase();
-    const button = document.querySelector(${JSON.stringify(trigger)});
-    if (!button) return { problem: 'its model menu was not found' };
-    const found = () => (button.id ? document.querySelector('[role="menu"][data-state="open"][aria-labelledby="' + CSS.escape(button.id) + '"]') : null);
+    const text = (el) => ((el && el.innerText) || '').trim();
+    const wanted = {
+      mode: ${JSON.stringify(mode)}.trim().toLowerCase(),
+      model: ${JSON.stringify(model)}.trim().toLowerCase(),
+      effort: ${JSON.stringify(effort)}.trim().toLowerCase(),
+    };
+    const problems = [];
+    const trigger = () => document.querySelector(${JSON.stringify(site.modelPicker)});
+
+    // Chat / Work: a switch in the message box of an ordinary chat (a temporary chat has none: Chat only).
+    const modes = () => Array.from(document.querySelectorAll(${JSON.stringify(`${site.modeGroup ?? '#none'} button`)}));
+    const modeOn = () => text(modes().find((b) => b.getAttribute('aria-pressed') === 'true')) || 'Chat';
+    if (wanted.mode && modeOn().toLowerCase() !== wanted.mode) {
+      const target = modes().find((b) => text(b).toLowerCase() === wanted.mode);
+      if (!target) {
+        problems.push('there is no ' + ${JSON.stringify(mode)} + ' mode' + (modes().length ? '' : ' in this chat (a temporary chat has none)'));
+      } else {
+        press(target);
+        // The model menu is redrawn for the mode.
+        if (await until(() => modeOn().toLowerCase() === wanted.mode, 4000)) await sleep(800);
+        else problems.push('it did not switch to ' + ${JSON.stringify(mode)} + ' mode');
+      }
+    }
+
+    if (!trigger()) return { mode: modeOn(), problems: [...problems, 'its model menu was not found'] };
+    const found = () => {
+      const button = trigger();
+      return button && button.id
+        ? document.querySelector('[role="menu"][data-state="open"][aria-labelledby="' + CSS.escape(button.id) + '"]')
+        : null;
+    };
     const open = async () => {
       if (found()) return found();
-      press(button);
+      press(trigger());
       return until(found);
     };
-    const name = (radio) => ((radio.querySelector('span') || radio).innerText || '').split('\\n')[0].trim();
+    const name = (radio) => text(radio.querySelector('span') || radio).split('\\n')[0].trim();
     const radios = () => Array.from(found()?.querySelectorAll('[role="menuitemradio"]') ?? []);
-    const radio = () => radios().find((r) => name(r).toLowerCase() === wantedModel);
-    const selected = () => name(radios().find((r) => r.getAttribute('aria-checked') === 'true') ?? document.createElement('i'));
+    const radio = () => radios().find((r) => name(r).toLowerCase() === wanted.model);
+    const selected = () => {
+      const on = radios().find((r) => r.getAttribute('aria-checked') === 'true');
+      return on ? name(on) : '';
+    };
     const power = () => found()?.querySelector('[aria-label="Power"]');
     const level = () => {
       const p = power();
       const status = p && document.getElementById((p.getAttribute('aria-describedby') || '').split(' ')[0]);
-      return ((status || found()?.querySelector('[role="status"]'))?.innerText || '').split(',')[0].trim();
+      return text(status || found()?.querySelector('[role="status"]')).split(',')[0].trim();
     };
     const close = async () => {
       const menu = found();
@@ -261,46 +298,61 @@ const IN_PAGE = {
       key(menu.contains(document.activeElement) ? document.activeElement : menu, 'Escape');
       await until(() => !found(), 2000);
     };
-    if (!(await open())) return { problem: 'its model menu did not open' };
+
+    if (!(await open())) return { mode: modeOn(), problems: [...problems, 'its model menu did not open'] };
     try {
-      if (wantedModel) {
+      if (wanted.model) {
         const target = radio();
-        if (!target) return { problem: 'its model menu has no ' + ${JSON.stringify(model)} + ' (it has: ' + radios().map(name).join(', ') + ')' };
-        if (target.getAttribute('aria-checked') !== 'true') {
+        if (!target) {
+          problems.push('it has no model ' + ${JSON.stringify(model)} + ' in ' + modeOn() + ' mode (it has: ' + radios().map(name).join(', ') + ')');
+        } else if (target.getAttribute('aria-checked') !== 'true') {
           if (target.closest('[inert]')) {
             const toggle = found().querySelector('[data-model-picker-view-toggle]');
             if (toggle) press(toggle);
             await until(() => !radio()?.closest('[inert]'), 2000);
           }
           press(radio() ?? target);
-          // The menu may stay open (it did) or close on the pick: then it is opened again to look.
+          // The menu may stay open (it does) or close on the pick: then it is opened again to look.
           const picked = await until(() => radio()?.getAttribute('aria-checked') === 'true' || !found(), 3000);
           if (!picked || !((await open()) && radio()?.getAttribute('aria-checked') === 'true')) {
             const why = (radio()?.getAttribute('aria-describedby') || '').split(' ')
-              .map((id) => document.getElementById(id)?.innerText).filter(Boolean).join(', ');
-            return { problem: 'it did not take ' + ${JSON.stringify(model)} + (why ? ' (' + why + ')' : '') + '; it is on ' + (selected() || 'its default') };
+              .map((id) => text(document.getElementById(id))).filter(Boolean).join(', ');
+            problems.push('it did not take ' + ${JSON.stringify(model)} + (why ? ' (' + why + ')' : '') + '; it is on ' + (selected() || 'its default'));
           }
         }
       }
-      if (wantedEffort) {
-        if (!(await open()) || !power()) return { problem: 'its model menu has no thinking effort to choose' };
-        // Right first (High is the top one), then left; each press must move the slider.
-        for (const k of ['ArrowRight', 'ArrowLeft']) {
-          for (let i = 0; i < 8 && level().toLowerCase() !== wantedEffort; i += 1) {
-            const before = level();
+
+      let effortNote = '';
+      if (wanted.effort) {
+        const ALIASES = { instant: 'none', light: 'low', 'extra high': 'xhigh' };
+        const FALLBACK = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'persistent'];
+        const order = () => {
+          const keys = Array.from(trigger()?.querySelectorAll('[data-reasoning-effort]') ?? []).map((el) => el.getAttribute('data-reasoning-effort'));
+          return keys.length ? keys : FALLBACK;
+        };
+        const keyOf = (label) => ALIASES[label.toLowerCase()] ?? label.toLowerCase();
+        const now = () => trigger()?.getAttribute('data-selected-reasoning-effort') || keyOf(level());
+        const rank = (k) => order().indexOf(k);
+        const want = rank(keyOf(wanted.effort));
+        if (!(await open()) || !power()) {
+          problems.push('it has no thinking effort to choose');
+        } else if (want < 0) {
+          problems.push('it has no thinking effort ' + ${JSON.stringify(effort)} + ' (it has: ' + order().join(', ') + ')');
+        } else {
+          // One step at a time; each press must move the slider. Up to the level, then down to it
+          // (or the nearest one below it, for a model without it).
+          const step = async (k) => {
+            const before = now() + '|' + level();
             key(power(), k);
-            if (!(await until(() => level() !== before, 1500))) break;
-          }
-          if (level().toLowerCase() === wantedEffort) break;
-        }
-        if (level().toLowerCase() !== wantedEffort) {
-          return { problem: 'it did not take thinking effort ' + ${JSON.stringify(effort)} + '; it is on ' + (level() || 'unknown') };
+            return until(() => now() + '|' + level() !== before, 1500);
+          };
+          for (let i = 0; i < 10 && rank(now()) < want && (await step('ArrowRight')); i += 1);
+          for (let i = 0; i < 10 && rank(now()) > want && (await step('ArrowLeft')); i += 1);
+          if (now() !== keyOf(wanted.effort)) effortNote = 'no ' + ${JSON.stringify(effort)} + ' for this model';
         }
       }
       const label = found()?.querySelector('[data-model-selection-label]')?.getAttribute('data-model-selection-label') || '';
-      const now = { model: selected(), effort: level(), label };
-      if (wantedModel && now.model.toLowerCase() !== wantedModel) return { problem: 'the model went back to ' + (now.model || 'its default') };
-      return now;
+      return { mode: modeOn(), model: selected(), effort: level(), effortNote, label, problems };
     } finally {
       await close();
     }
@@ -546,30 +598,34 @@ export function createChat(settings, site) {
   const warnedModel = new Set();
   let modelSaid = '';
 
+  /** Chat or Work (config.json chrome.mode), where the site has the choice (ChatGPT). */
+  const workMode = Boolean(site.modeGroup) && String(settings.mode ?? '').trim().toLowerCase() === 'work';
+
   /**
-   * ChatGPT's model and thinking effort (config.json chrome.model, chrome.effort),
-   * chosen in its model menu in each new chat: chatgpt.com puts a new chat back on
-   * its default. If they cannot be chosen (the menu changed, the model is gone or
-   * at its usage limit), the chat goes on with what is chosen, and the log says
-   * so once for each reason.
+   * ChatGPT's mode, model and thinking effort (config.json chrome.mode,
+   * chrome.model, chrome.effort), chosen in its message box in each new chat:
+   * chatgpt.com puts a new chat back on Chat and its default model. What
+   * cannot be chosen (the menu changed, the model is gone or at its usage
+   * limit) is left as it is and the chat goes on; the log says so once for
+   * each reason.
    */
   async function chooseModel(page) {
-    const model = settings.model ?? '';
-    const effort = settings.effort ?? '';
-    if (!site.modelPicker || (!model && !effort)) return;
-    const result = await bounded(page.evaluate(IN_PAGE.pickModel(site.modelPicker, model, effort)), 30_000, 'Choosing the model')
-      .catch((error) => ({ problem: error.message }));
-    if (result.problem) {
-      if (!warnedModel.has(result.problem)) {
-        warnedModel.add(result.problem);
-        log.warn(`${site.name}: could not choose ${[model, effort].filter(Boolean).join(', ')}: ${result.problem}; asking with what is chosen`);
-      }
-      return;
+    const wanted = { mode: settings.mode ?? '', model: settings.model ?? '', effort: settings.effort ?? '' };
+    if (!site.modelPicker || (!wanted.mode && !wanted.model && !wanted.effort)) return;
+    const result = await bounded(page.evaluate(IN_PAGE.pickModel(site, wanted)), 45_000, 'Choosing the model')
+      .catch((error) => ({ problems: [error.message] }));
+    const asked = [wanted.mode, wanted.model, wanted.effort].filter(Boolean).join(' · ');
+    for (const problem of result.problems ?? []) {
+      if (warnedModel.has(problem)) continue;
+      warnedModel.add(problem);
+      log.warn(`${site.name}: could not choose ${asked}: ${problem}; asking with what is chosen`);
     }
-    const said = `${result.model || model} · ${result.effort || effort}`;
+    if (!result.model && !result.effort) return;
+    const said = [result.mode, result.model, result.effort].filter(Boolean).join(' · ')
+      + (result.effortNote ? ` (${result.effortNote})` : '');
     if (said !== modelSaid) {
       modelSaid = said;
-      log.info(`${site.name}: ${said}${result.label ? ` (${result.label})` : ''}`);
+      log.info(`${site.name}: ${said}${result.label ? ` [${result.label}]` : ''}`);
     }
   }
 
@@ -606,7 +662,8 @@ export function createChat(settings, site) {
     // Not brought to the front: a new tab is already the active one in its
     // window, and focusing the window would pull the person away from an
     // application form they are filling in.
-    const url = site.newChatUrl(home, { temporary: settings.temporaryChat, webSearch });
+    // Work mode is only in an ordinary chat: a temporary chat has Chat only.
+    const url = site.newChatUrl(home, { temporary: settings.temporaryChat && !workMode, webSearch });
     await load(page, url);
     await waitForComposer(page);
     if (!(await signedIn(page))) {
@@ -630,7 +687,13 @@ export function createChat(settings, site) {
     await chooseModel(page);
 
     let searching = false;
-    if (webSearch && site.searchPill) {
+    if (webSearch && workMode) {
+      // Switching to Work takes the Web search pill away: Work mode has no such switch.
+      if (!warnedNoSearch) {
+        warnedNoSearch = true;
+        log.info(`${site.name}: Work mode has no Web search switch; asking without it`);
+      }
+    } else if (webSearch && site.searchPill) {
       // No Web search (the site changed, or the account has none): ask without it.
       searching = await searchOn(page, 5000);
       if (!searching && !warnedNoSearch) {
